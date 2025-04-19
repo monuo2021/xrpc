@@ -1,0 +1,17 @@
+syntax = "proto3";
+package xrpc;
+
+message RpcHeader {
+    string service_name = 1;
+    string method_name = 2;
+    uint32 args_size = 3;
+    uint64 request_id = 4;
+    int32 status = 5;
+    map<string, string> metadata = 6;
+    bool compressed = 7;
+}
+
+message RpcError {
+    int32 code = 1;
+    string message = 2;
+}

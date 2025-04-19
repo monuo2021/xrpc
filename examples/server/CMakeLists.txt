@@ -1,0 +1,2 @@
+add_executable(user_server user_server.cc)
+target_link_libraries(user_server xrpc_core)
