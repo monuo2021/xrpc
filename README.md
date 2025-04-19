@@ -60,38 +60,50 @@ XRPC/
 
 # XRPC
 
-XRPC is a lightweight RPC framework for learning and prototyping, bridging the gap between educational projects and production-grade systems. It supports service discovery (ZooKeeper), long-lived connections, and asynchronous calls.
+XRPC is a lightweight RPC framework designed for learning and prototyping, bridging the gap between educational projects and production-grade systems. It supports service registration/discovery (ZooKeeper), long-lived connections, asynchronous calls, and extensible protocols.
 
 ## Features
-- Protobuf-based protocol
-- ZooKeeper service registry
-- Muduo-based networking
-- Synchronous and asynchronous calls
-- Error handling and cancellation
+- **Protobuf-based**: Uses Protocol Buffers for service definitions and communication.
+- **Service Discovery**: Integrates with ZooKeeper for dynamic service registration and discovery.
+- **Long Connections**: Supports persistent TCP connections via Muduo.
+- **Asynchronous Calls**: Allows non-blocking RPC calls with callbacks.
+- **Extensible**: Supports metadata, compression, and interceptors.
 
-## Installation
-1. Install dependencies:
-   ```bash
-   sudo apt-get install libprotobuf-dev protobuf-compiler libzookeeper-mt-dev
-   git clone https://github.com/chenshuo/muduo && cd muduo && ./build.sh && sudo ./install.sh
-   ```
+## Prerequisites
+- CMake 3.10+
+- C++11 compiler (g++, clang++)
+- Muduo network library
+- Protocol Buffers
+- ZooKeeper C client
+- spdlog (optional, for logging)
 
-2. Build XRPC:
+## Build Instructions
+```bash
+mkdir build && cd build
+cmake ..
+make
+```
 
-    ```bash
-    mkdir build && cd build
-    cmake ..
-    make
-    ```
+## Configuration
+Edit configs/xrpc.conf to set ZooKeeper address, log level, etc.
 
-## Usage
+## Examples
 
 Run the server:
 ```bash
-./bin/user_server
+./bin/user_server --config=configs/xrpc.conf
 ```
 
 Run the client:
 ```bash
-./bin/user_client
+./bin/user_client --config=configs/xrpc.conf
 ```
+
+## Directory Structure
+
+- protos/: Protocol Buffer definitions.
+- src/: Core implementation (channel, server, registry, transport).
+- examples/: Client and server examples.
+- tests/: Unit tests.
+- docs/: API, design, and tutorial documentation.
+- configs/: Configuration files.
