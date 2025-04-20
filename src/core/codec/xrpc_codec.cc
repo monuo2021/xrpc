@@ -8,29 +8,27 @@
 namespace xrpc {
 
 std::string XrpcCodec::Encode(const RpcHeader& header, const google::protobuf::Message& args) {
-    std::string header_str;
-    if (!header.SerializeToString(&header_str)) {
-        XRPC_LOG_ERROR("Failed to serialize RpcHeader");
-        throw std::runtime_error("Failed to serialize RpcHeader");
-    }
-
     std::string args_str;
     if (!args.SerializeToString(&args_str)) {
         XRPC_LOG_ERROR("Failed to serialize args");
         throw std::runtime_error("Failed to serialize args");
     }
 
-    // 更新 args_size
+    // 更新 args_size 和压缩状态
     RpcHeader mutable_header = header;
     mutable_header.set_args_size(args_str.size());
-    if (!mutable_header.SerializeToString(&header_str)) {
-        XRPC_LOG_ERROR("Failed to serialize updated RpcHeader");
-        throw std::runtime_error("Failed to serialize updated RpcHeader");
-    }
 
     if (mutable_header.compressed()) {
-        args_str = Compress(args_str);
+        std::string compressed_args = Compress(args_str);
+        mutable_header.set_args_size(compressed_args.size()); // 更新为压缩后大小
+        args_str = compressed_args;
         XRPC_LOG_DEBUG("Compressed args from {} to {} bytes", mutable_header.args_size(), args_str.size());
+    }
+
+    std::string header_str;
+    if (!mutable_header.SerializeToString(&header_str)) {
+        XRPC_LOG_ERROR("Failed to serialize RpcHeader");
+        throw std::runtime_error("Failed to serialize RpcHeader");
     }
 
     std::string result;
@@ -73,11 +71,17 @@ bool XrpcCodec::Decode(const std::string& data, RpcHeader& header, std::string& 
     }
 
     if (header.compressed()) {
-        args = Decompress(args);
-        XRPC_LOG_DEBUG("Decompressed args to {} bytes", args.size());
+        try {
+            args = Decompress(args);
+            XRPC_LOG_DEBUG("Decompressed args to {} bytes", args.size());
+        } catch (const std::runtime_error& e) {
+            XRPC_LOG_ERROR("Decompression failed: {}", e.what());
+            return false;
+        }
     }
 
-    XRPC_LOG_DEBUG("Decoded data: header_size={}, args_size={}", header_size, args.size());
+    XRPC_LOG_DEBUG("Decoded data: header_size={}, args_size={}, compressed={}",
+                   header_size, args.size(), header.compressed());
     return true;
 }
 
@@ -113,8 +117,10 @@ std::string XrpcCodec::Compress(const std::string& data) {
     do {
         stream.next_out = (Bytef*)buffer;
         stream.avail_out = sizeof(buffer);
-        if (deflate(&stream, Z_FINISH) == Z_STREAM_ERROR) {
+        int ret = deflate(&stream, Z_FINISH);
+        if (ret == Z_STREAM_ERROR) {
             deflateEnd(&stream);
+            XRPC_LOG_ERROR("Failed to compress data");
             throw std::runtime_error("Failed to compress data");
         }
         result.append(buffer, sizeof(buffer) - stream.avail_out);
@@ -140,8 +146,10 @@ std::string XrpcCodec::Decompress(const std::string& data) {
     do {
         stream.next_out = (Bytef*)buffer;
         stream.avail_out = sizeof(buffer);
-        if (inflate(&stream, Z_NO_FLUSH) == Z_STREAM_ERROR) {
+        int ret = inflate(&stream, Z_NO_FLUSH);
+        if (ret == Z_STREAM_ERROR) {
             inflateEnd(&stream);
+            XRPC_LOG_ERROR("Failed to decompress data");
             throw std::runtime_error("Failed to decompress data");
         }
         result.append(buffer, sizeof(buffer) - stream.avail_out);

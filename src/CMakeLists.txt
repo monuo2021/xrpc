@@ -1,3 +1,6 @@
+# 查找 spdlog
+find_package(spdlog REQUIRED)
+
 # 收集源文件
 file(GLOB CORE_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/core/*.cc"
@@ -15,6 +18,7 @@ target_link_libraries(xrpc_core
     ${MUDUO_NET}
     ${ZOOKEEPER_MT}
     ${ZLIB_LIBRARIES}
+    spdlog::spdlog
 )
 target_include_directories(xrpc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

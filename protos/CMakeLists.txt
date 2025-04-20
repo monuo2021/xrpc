@@ -25,3 +25,4 @@ endforeach()
 # 创建 Protobuf 库
 add_library(xrpc_proto ${PROTO_SRCS})
 target_link_libraries(xrpc_proto ${Protobuf_LIBRARIES})
+target_include_directories(xrpc_proto PUBLIC ${CMAKE_BINARY_DIR}/protos)
