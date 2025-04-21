@@ -11,7 +11,12 @@ TEST(XrpcConfigTest, LoadAndGet) {
     xrpc::XrpcConfig config;
     config.Load("/home/tan/program/CppWorkSpace/xrpc/configs/xrpc.conf");
     EXPECT_EQ(config.Get("zookeeper_ip"), "127.0.0.1");
-    EXPECT_EQ(config.Get("log_level"), "info");
+    EXPECT_EQ(config.Get("zookeeper_port"), "2181");
+    EXPECT_EQ(config.Get("zookeeper_timeout_ms"), "6000");
+    EXPECT_EQ(config.Get("server_ip"), "0.0.0.0");
+    EXPECT_EQ(config.Get("server_port"), "8080");
+    EXPECT_EQ(config.Get("log_level"), "debug");
+    EXPECT_EQ(config.Get("log_file"), "xrpc.log");
     EXPECT_EQ(config.Get("missing_key", "default"), "default");
 }
 
@@ -112,7 +117,12 @@ TEST(XrpcCodecTest, EncodeAndDecodeWithCompressionLargeData) {
 }
 
 int main(int argc, char** argv) {
-    xrpc::InitLogger("test.log", xrpc::LogLevel::DEBUG);
+    try {
+        xrpc::InitLoggerFromConfig("/home/tan/program/CppWorkSpace/xrpc/configs/xrpc.conf");
+    } catch (const std::runtime_error& ex) {
+        std::cerr << "Failed to initialize logger: " << ex.what() << std::endl;
+        return 1;
+    }
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

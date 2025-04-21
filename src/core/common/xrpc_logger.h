@@ -16,11 +16,13 @@ enum class LogLevel {
     CRITICAL
 };
 
-// 初始化日志系统
+// 初始化日志系统（指定文件和级别）
 void InitLogger(const std::string& file, LogLevel level);
 
+// 从配置文件初始化日志系统
+void InitLoggerFromConfig(const std::string& config_file);
+
 // 日志宏
-// 修改日志宏，确保它们能正常工作
 #define XRPC_LOG_TRACE(...) SPDLOG_LOGGER_CALL(spdlog::default_logger(), spdlog::level::trace, __VA_ARGS__)
 #define XRPC_LOG_DEBUG(...) SPDLOG_LOGGER_CALL(spdlog::default_logger(), spdlog::level::debug, __VA_ARGS__)
 #define XRPC_LOG_INFO(...) SPDLOG_LOGGER_CALL(spdlog::default_logger(), spdlog::level::info, __VA_ARGS__)

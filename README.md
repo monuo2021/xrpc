@@ -39,11 +39,9 @@ XRPC/
 │   └── CMakeLists.txt          # 核心模块编译规则
 ├── examples/                   # 示例代码
 │   ├── client/                 # 客户端示例
-│   │   ├── user_client.cc
-│   │   └── CMakeLists.txt
+│   │   └── user_client.cc
 │   ├── server/                 # 服务端示例
-│   │   ├── user_server.cc
-│   │   └── CMakeLists.txt
+│   │   └── user_server.cc
 │   └── CMakeLists.txt
 ├── tests/                      # 单元测试
 │   ├── channel_test.cc         # Channel 测试
