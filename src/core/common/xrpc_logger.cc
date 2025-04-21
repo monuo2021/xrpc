@@ -1,6 +1,5 @@
 #include "core/common/xrpc_logger.h"
 #include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
 #include <stdexcept>
 
 namespace xrpc {
@@ -9,13 +8,9 @@ void InitLogger(const std::string& file, LogLevel level) {
     try {
         // 创建文件和控制台输出
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(file, true);
-        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-
-        // 使用 initializer_list 传递 sinks
-        spdlog::sinks_init_list sinks = {file_sink, console_sink};
 
         // 创建 logger
-        auto logger = std::make_shared<spdlog::logger>("xrpc", sinks);
+        auto logger = std::make_shared<spdlog::logger>("xrpc", file_sink);
         
         // 设置日志级别
         switch (level) {

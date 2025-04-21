@@ -21,9 +21,9 @@ std::string XrpcCodec::Encode(const RpcHeader& header, const google::protobuf::M
     if (mutable_header.compressed() && args_str.size() > 100) { // 跳过小数据压缩
         std::string compressed_args = Compress(args_str);
         if (compressed_args.size() < args_str.size()) { // 仅当压缩有效时使用
+            XRPC_LOG_DEBUG("Compressed args from {} to {} bytes", args_str.size(), compressed_args.size());
             mutable_header.set_args_size(compressed_args.size());
             args_str = compressed_args;
-            XRPC_LOG_DEBUG("Compressed args from {} to {} bytes", header.args_size(), args_str.size());
         } else {
             mutable_header.set_compressed(false); // 压缩无效，关闭标志
             XRPC_LOG_DEBUG("Skipped compression: compressed size {} >= original size {}", 
