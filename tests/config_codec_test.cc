@@ -115,14 +115,3 @@ TEST(XrpcCodecTest, EncodeAndDecodeWithCompressionLargeData) {
         << "Failed to parse decoded_args, size: " << decoded_args.size() << ", hex: " << oss.str();
     EXPECT_EQ(decoded_message.value(), std::string(1000, 'a'));
 }
-
-int main(int argc, char** argv) {
-    try {
-        xrpc::InitLoggerFromConfig("/home/tan/program/CppWorkSpace/xrpc/configs/xrpc.conf");
-    } catch (const std::runtime_error& ex) {
-        std::cerr << "Failed to initialize logger: " << ex.what() << std::endl;
-        return 1;
-    }
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
