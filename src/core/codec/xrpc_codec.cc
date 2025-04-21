@@ -18,11 +18,20 @@ std::string XrpcCodec::Encode(const RpcHeader& header, const google::protobuf::M
     RpcHeader mutable_header = header;
     mutable_header.set_args_size(args_str.size());
 
-    if (mutable_header.compressed()) {
+    if (mutable_header.compressed() && args_str.size() > 100) { // 跳过小数据压缩
         std::string compressed_args = Compress(args_str);
-        mutable_header.set_args_size(compressed_args.size()); // 更新为压缩后大小
-        args_str = compressed_args;
-        XRPC_LOG_DEBUG("Compressed args from {} to {} bytes", mutable_header.args_size(), args_str.size());
+        if (compressed_args.size() < args_str.size()) { // 仅当压缩有效时使用
+            mutable_header.set_args_size(compressed_args.size());
+            args_str = compressed_args;
+            XRPC_LOG_DEBUG("Compressed args from {} to {} bytes", header.args_size(), args_str.size());
+        } else {
+            mutable_header.set_compressed(false); // 压缩无效，关闭标志
+            XRPC_LOG_DEBUG("Skipped compression: compressed size {} >= original size {}", 
+                           compressed_args.size(), args_str.size());
+        }
+    } else if (mutable_header.compressed()) {
+        mutable_header.set_compressed(false); // 数据太小，禁用压缩
+        XRPC_LOG_DEBUG("Skipped compression: data size {} too small", args_str.size());
     }
 
     std::string header_str;
@@ -104,7 +113,7 @@ bool XrpcCodec::DecodeResponse(const std::string& data, google::protobuf::Messag
 
 std::string XrpcCodec::Compress(const std::string& data) {
     z_stream stream = {};
-    if (deflateInit(&stream, Z_DEFAULT_COMPRESSION) != Z_OK) {
+    if (deflateInit(&stream, Z_BEST_SPEED) != Z_OK) { // 使用 Z_BEST_SPEED 减少开销
         XRPC_LOG_ERROR("Failed to initialize deflate");
         throw std::runtime_error("Failed to initialize deflate");
     }
