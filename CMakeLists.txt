@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(XRPC VERSION 1.0 LANGUAGES CXX)
 
 # 设置 C++ 标准
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 查找依赖

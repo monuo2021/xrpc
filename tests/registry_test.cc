@@ -10,7 +10,6 @@ namespace xrpc {
 class ZookeeperClientTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        InitLoggerFromConfig("/home/tan/program/CppWorkSpace/xrpc/configs/xrpc.conf");
         zk_.Start();
     }
 
@@ -49,16 +48,20 @@ TEST_F(ZookeeperClientTest, WatchNode) {
     std::string data = "methods=Login";
     std::string received_data;
 
-    // 设置 Watch
-    zk_.Watch(path, [&received_data](std::string new_data) {
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool ready = false;
+    zk_.Watch(path, [&](std::string new_data) {
         received_data = new_data;
+        std::lock_guard lock(mtx);
+        ready = true;
+        cv.notify_one();
     });
-
-    // 注册节点
     zk_.Register(path, data, true);
-
-    // 等待 Watch 触发
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    {
+        std::unique_lock lock(mtx);
+        cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return ready; });
+    }
     EXPECT_EQ(received_data, data);
 
     // 更新节点
