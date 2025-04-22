@@ -17,7 +17,7 @@ ZookeeperClient::~ZookeeperClient() {
 }
 
 void ZookeeperClient::Start() {
-    std::string host = config_.Get("zookeeper_ip", "127.0.0.1") + ":" + 
+    std::string host = config_.Get("zookeeper_ip", "127.0.0.1") + ":" +
                        config_.Get("zookeeper_port", "2181");
     int timeout_ms = std::stoi(config_.Get("zookeeper_timeout_ms", "6000"));
 
@@ -78,7 +78,7 @@ void ZookeeperClient::Register(const std::string& path, const std::string& data,
     } else {
         // 创建临时节点
         int flags = ephemeral ? ZOO_EPHEMERAL : 0;
-        ret = zoo_create(zk_handle_, path.c_str(), data.c_str(), data.size(), 
+        ret = zoo_create(zk_handle_, path.c_str(), data.c_str(), data.size(),
                          &ZOO_OPEN_ACL_UNSAFE, flags, nullptr, 0);
         if (ret != ZOK) {
             XRPC_LOG_ERROR("Failed to create node {}: {}", path, zerror(ret));
@@ -88,7 +88,7 @@ void ZookeeperClient::Register(const std::string& path, const std::string& data,
 
     // 更新缓存
     {
-        std::lock_guard<std::mutex> lock(cache_mutex_);
+        std::lock_guard lock(cache_mutex_);
         cache_[path] = data;
     }
 
@@ -98,7 +98,7 @@ void ZookeeperClient::Register(const std::string& path, const std::string& data,
 std::string ZookeeperClient::Discover(const std::string& path) {
     // 优先检查缓存
     {
-        std::lock_guard<std::mutex> lock(cache_mutex_);
+        std::lock_guard lock(cache_mutex_);
         auto it = cache_.find(path);
         if (it != cache_.end()) {
             XRPC_LOG_DEBUG("Cache hit for node {}: {}", path, it->second);
@@ -111,7 +111,7 @@ std::string ZookeeperClient::Discover(const std::string& path) {
 
     // 更新缓存
     {
-        std::lock_guard<std::mutex> lock(cache_mutex_);
+        std::lock_guard lock(cache_mutex_);
         cache_[path] = data;
     }
 
@@ -126,24 +126,24 @@ void ZookeeperClient::Watch(const std::string& path, std::function<void(std::str
 
     // 存储回调
     {
-        std::lock_guard<std::mutex> lock(cache_mutex_);
+        std::lock_guard lock(cache_mutex_);
         watchers_[path] = callback;
     }
 
     char buffer[512];
     int buffer_len = sizeof(buffer);
     struct Stat stat;
-    
+
     // 尝试获取数据并设置 Watcher
     int ret = zoo_wget(zk_handle_, path.c_str(), WatcherCallback, this, buffer, &buffer_len, &stat);
-    
+
     if (ret == ZOK) {
         // 节点存在，立即触发回调
         if (buffer_len > 0) {
             std::string data(buffer, buffer_len);
             callback(data);
             {
-                std::lock_guard<std::mutex> lock(cache_mutex_);
+                std::lock_guard lock(cache_mutex_);
                 cache_[path] = data;
             }
         }
@@ -159,13 +159,15 @@ void ZookeeperClient::Watch(const std::string& path, std::function<void(std::str
         XRPC_LOG_ERROR("Failed to set watch: {}", zerror(ret));
         throw std::runtime_error("Failed to set watch: " + std::string(zerror(ret)));
     }
+
+    XRPC_LOG_DEBUG("Set watch on node {}", path);
 }
 
 void ZookeeperClient::Heartbeat() {
     while (is_connected_ && zk_handle_) {
         std::vector<std::string> paths;
         {
-            std::lock_guard<std::mutex> lock(cache_mutex_);
+            std::lock_guard lock(cache_mutex_);
             for (const auto& pair : cache_) {
                 paths.push_back(pair.first);
             }
@@ -176,8 +178,10 @@ void ZookeeperClient::Heartbeat() {
             int ret = zoo_exists(zk_handle_, path.c_str(), 0, &stat);
             if (ret != ZOK) {
                 XRPC_LOG_WARN("Node {} no longer exists: {}", path, zerror(ret));
-                std::lock_guard<std::mutex> lock(cache_mutex_);
-                cache_.erase(path);
+                {
+                    std::lock_guard lock(cache_mutex_);
+                    cache_.erase(path);
+                }
             }
         }
 
@@ -203,7 +207,7 @@ void ZookeeperClient::WatcherCallback(zhandle_t* zh, int type, int state, const 
                 XRPC_LOG_DEBUG("Node {} updated, data: {}", node_path, data);
                 std::function<void(std::string)> callback;
                 {
-                    std::lock_guard<std::mutex> lock(client->cache_mutex_);
+                    std::lock_guard lock(client->cache_mutex_);
                     client->cache_[node_path] = data;
                     auto it = client->watchers_.find(node_path);
                     if (it != client->watchers_.end()) {
@@ -220,7 +224,7 @@ void ZookeeperClient::WatcherCallback(zhandle_t* zh, int type, int state, const 
             }
         } else if (type == ZOO_DELETED_EVENT) {
             XRPC_LOG_DEBUG("Node {} deleted", node_path);
-            std::lock_guard<std::mutex> lock(client->cache_mutex_);
+            std::lock_guard lock(client->cache_mutex_);
             client->cache_.erase(node_path);
             client->watchers_.erase(node_path);
         }
