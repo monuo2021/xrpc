@@ -46,8 +46,10 @@ XRPC/
 ├── tests/                      # 单元测试
 │   ├── channel_test.cc         # Channel 测试
 │   ├── controller_test.cc      # Controller 测试
+│   ├── config_codec_test.cc    # codec 测试
 │   ├── server_test.cc          # Server 测试
 │   ├── registry_test.cc        # Registry 测试
+│   ├── main.cc                 # 测试主函数
 │   └── CMakeLists.txt
 ├── scripts/                    # 辅助脚本
 │   ├── generate_protos.sh      # 生成 Protobuf 代码
