@@ -29,7 +29,9 @@ XRPC/
 │   │   └── common/             # 公共工具
 │   │       ├── xrpc_common.h
 │   │       ├── xrpc_config.h
-│   │       └── xrpc_logger.h
+│   │       ├── xrpc_config.cc
+│   │       ├── xrpc_logger.h
+│   │       └── xrpc_logger.cc
 │   ├── registry/               # 服务注册与发现
 │   │   ├── zookeeper_client.h
 │   │   └── zookeeper_client.cc
