@@ -1,5 +1,5 @@
 #include "core/server/xrpc_server.h"
-#include "example/user_service.pb.h"
+#include "user_service.pb.h"
 #include <gtest/gtest.h>
 
 namespace xrpc {

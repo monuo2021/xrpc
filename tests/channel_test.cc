@@ -1,7 +1,7 @@
 #include "core/channel/xrpc_channel.h"
 #include "core/controller/xrpc_controller.h"
 #include "registry/zookeeper_client.h"
-#include "example/user_service.pb.h"
+#include "user_service.pb.h"
 #include <gtest/gtest.h>
 
 namespace xrpc {
