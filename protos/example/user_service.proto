@@ -1,6 +1,8 @@
 syntax = "proto3";
 package example;
 
+option cc_generic_services=true;
+
 service UserService {
     rpc Login(LoginRequest) returns (LoginResponse);
 }
