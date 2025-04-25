@@ -8,6 +8,7 @@
 #include <functional>
 #include <mutex>
 #include <map>
+#include <atomic>
 
 namespace xrpc {
 
@@ -19,19 +20,23 @@ public:
     void Start();
     void Register(const std::string& path, const std::string& data, bool ephemeral = false);
     std::string Discover(const std::string& path);
+    void Delete(const std::string& path);
     void Watch(const std::string& path, std::function<void(std::string)> callback);
 
 private:
     void Heartbeat();
     std::string GetNodeData(const std::string& path);
+    void RegisterWatcher(const std::string& path);
     static void WatcherCallback(zhandle_t* zh, int type, int state, const char* path, void* context);
 
     zhandle_t* zk_handle_;
-    bool is_connected_;
+    std::atomic<bool> is_connected_;
+    std::atomic<bool> running_;
     XrpcConfig config_;
     std::mutex cache_mutex_;
+    std::mutex mutex_;
     std::map<std::string, std::string> cache_;
-    std::map<std::string, std::function<void(std::string)>> watchers_; // 存储路径和回调
+    std::map<std::string, std::function<void(std::string)>> watchers_;
 };
 
 } // namespace xrpc

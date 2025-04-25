@@ -5,11 +5,16 @@
 
 namespace xrpc {
 
-ZookeeperClient::ZookeeperClient() : zk_handle_(nullptr), is_connected_(false) {
+ZookeeperClient::ZookeeperClient() : zk_handle_(nullptr), is_connected_(false), running_(false) {
     config_.Load("/home/tan/program/CppWorkSpace/xrpc/configs/xrpc.conf");
 }
 
 ZookeeperClient::~ZookeeperClient() {
+    running_ = false;
+    {
+        std::lock_guard lock(cache_mutex_);
+        watchers_.clear();
+    }
     if (zk_handle_) {
         zookeeper_close(zk_handle_);
         zk_handle_ = nullptr;
@@ -17,6 +22,7 @@ ZookeeperClient::~ZookeeperClient() {
 }
 
 void ZookeeperClient::Start() {
+    std::lock_guard lock(mutex_);
     std::string host = config_.Get("zookeeper_ip", "127.0.0.1") + ":" +
                        config_.Get("zookeeper_port", "2181");
     int timeout_ms = std::stoi(config_.Get("zookeeper_timeout_ms", "6000"));
@@ -27,10 +33,13 @@ void ZookeeperClient::Start() {
         throw std::runtime_error("Failed to initialize ZooKeeper client");
     }
 
-    // 等待连接
     int max_retries = 5;
     for (int i = 0; i < max_retries && !is_connected_; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        if (zoo_state(zk_handle_) == ZOO_CONNECTED_STATE) {
+            is_connected_ = true;
+            break;
+        }
     }
 
     if (!is_connected_) {
@@ -41,18 +50,17 @@ void ZookeeperClient::Start() {
     }
 
     XRPC_LOG_INFO("Connected to ZooKeeper: {}", host);
-
-    // 启动心跳线程
+    running_ = true;
     std::thread([this]() { Heartbeat(); }).detach();
 }
 
 void ZookeeperClient::Register(const std::string& path, const std::string& data, bool ephemeral) {
+    std::lock_guard lock(mutex_);
     if (!is_connected_ || !zk_handle_) {
         XRPC_LOG_ERROR("ZooKeeper not connected");
         throw std::runtime_error("ZooKeeper not connected");
     }
 
-    // 检查父节点
     size_t last_slash = path.rfind('/');
     if (last_slash != std::string::npos) {
         std::string parent = path.substr(0, last_slash);
@@ -65,7 +73,6 @@ void ZookeeperClient::Register(const std::string& path, const std::string& data,
         }
     }
 
-    // 检查节点是否存在（幂等）
     struct Stat stat;
     int ret = zoo_exists(zk_handle_, path.c_str(), 0, &stat);
     if (ret == ZOK) {
@@ -76,7 +83,6 @@ void ZookeeperClient::Register(const std::string& path, const std::string& data,
             throw std::runtime_error("Failed to update node: " + std::string(zerror(ret)));
         }
     } else {
-        // 创建临时节点
         int flags = ephemeral ? ZOO_EPHEMERAL : 0;
         ret = zoo_create(zk_handle_, path.c_str(), data.c_str(), data.size(),
                          &ZOO_OPEN_ACL_UNSAFE, flags, nullptr, 0);
@@ -86,7 +92,6 @@ void ZookeeperClient::Register(const std::string& path, const std::string& data,
         }
     }
 
-    // 更新缓存
     {
         std::lock_guard lock(cache_mutex_);
         cache_[path] = data;
@@ -96,7 +101,7 @@ void ZookeeperClient::Register(const std::string& path, const std::string& data,
 }
 
 std::string ZookeeperClient::Discover(const std::string& path) {
-    // 优先检查缓存
+    std::lock_guard lock(mutex_);
     {
         std::lock_guard lock(cache_mutex_);
         auto it = cache_.find(path);
@@ -106,57 +111,65 @@ std::string ZookeeperClient::Discover(const std::string& path) {
         }
     }
 
-    // 从 ZooKeeper 获取数据
     std::string data = GetNodeData(path);
-
-    // 更新缓存
     {
         std::lock_guard lock(cache_mutex_);
         cache_[path] = data;
     }
-
     return data;
 }
 
+void ZookeeperClient::Delete(const std::string& path) {
+    std::lock_guard lock(mutex_);
+    if (!zk_handle_) {
+        throw std::runtime_error("ZookeeperClient::Delete - ZooKeeper client not started");
+    }
+
+    int exists = zoo_exists(zk_handle_, path.c_str(), 0, nullptr);
+    if (exists == ZNONODE) {
+        return;
+    }
+
+    if (exists != ZOK) {
+        throw std::runtime_error("ZookeeperClient::Delete - Error checking node existence: " + std::string(zerror(exists)));
+    }
+
+    int rc = zoo_delete(zk_handle_, path.c_str(), -1);
+    if (rc != ZOK) {
+        throw std::runtime_error("ZookeeperClient::Delete - Failed to delete node: " + std::string(zerror(rc)));
+    }
+
+    {
+        std::lock_guard lock(cache_mutex_);
+        cache_.erase(path);
+        watchers_.erase(path);
+    }
+}
+
 void ZookeeperClient::Watch(const std::string& path, std::function<void(std::string)> callback) {
+    std::lock_guard lock(mutex_);
     if (!is_connected_ || !zk_handle_) {
         XRPC_LOG_ERROR("ZooKeeper not connected");
         throw std::runtime_error("ZooKeeper not connected");
     }
 
-    // 存储回调
     {
         std::lock_guard lock(cache_mutex_);
         watchers_[path] = callback;
     }
+    RegisterWatcher(path);
+}
 
-    char buffer[512];
-    int buffer_len = sizeof(buffer);
+void ZookeeperClient::RegisterWatcher(const std::string& path) {
+    if (!is_connected_ || !zk_handle_) {
+        XRPC_LOG_ERROR("ZooKeeper not connected for watcher on {}", path);
+        return;
+    }
+
     struct Stat stat;
-
-    // 尝试获取数据并设置 Watcher
-    int ret = zoo_wget(zk_handle_, path.c_str(), WatcherCallback, this, buffer, &buffer_len, &stat);
-
-    if (ret == ZOK) {
-        // 节点存在，立即触发回调
-        if (buffer_len > 0) {
-            std::string data(buffer, buffer_len);
-            callback(data);
-            {
-                std::lock_guard lock(cache_mutex_);
-                cache_[path] = data;
-            }
-        }
-    } else if (ret == ZNONODE) {
-        // 节点不存在，仅设置 Watcher
-        XRPC_LOG_DEBUG("Node {} does not exist, setting watch for future creation", path);
-        ret = zoo_wexists(zk_handle_, path.c_str(), WatcherCallback, this, &stat);
-        if (ret != ZOK && ret != ZNONODE) {
-            XRPC_LOG_ERROR("Failed to set existence watch: {}", zerror(ret));
-            throw std::runtime_error("Failed to set watch: " + std::string(zerror(ret)));
-        }
-    } else {
-        XRPC_LOG_ERROR("Failed to set watch: {}", zerror(ret));
+    int ret = zoo_wexists(zk_handle_, path.c_str(), WatcherCallback, this, &stat);
+    if (ret != ZOK && ret != ZNONODE) {
+        XRPC_LOG_ERROR("Failed to set existence watch on {}: {}", path, zerror(ret));
         throw std::runtime_error("Failed to set watch: " + std::string(zerror(ret)));
     }
 
@@ -164,7 +177,7 @@ void ZookeeperClient::Watch(const std::string& path, std::function<void(std::str
 }
 
 void ZookeeperClient::Heartbeat() {
-    while (is_connected_ && zk_handle_) {
+    while (running_ && is_connected_ && zk_handle_) {
         std::vector<std::string> paths;
         {
             std::lock_guard lock(cache_mutex_);
@@ -181,6 +194,7 @@ void ZookeeperClient::Heartbeat() {
                 {
                     std::lock_guard lock(cache_mutex_);
                     cache_.erase(path);
+                    watchers_.erase(path);
                 }
             }
         }
@@ -191,6 +205,11 @@ void ZookeeperClient::Heartbeat() {
 
 void ZookeeperClient::WatcherCallback(zhandle_t* zh, int type, int state, const char* path, void* context) {
     ZookeeperClient* client = static_cast<ZookeeperClient*>(context);
+    if (!client || !client->zk_handle_) {
+        XRPC_LOG_ERROR("Invalid client or zk_handle in WatcherCallback");
+        return;
+    }
+
     if (type == ZOO_SESSION_EVENT) {
         if (state == ZOO_CONNECTED_STATE) {
             client->is_connected_ = true;
@@ -198,35 +217,50 @@ void ZookeeperClient::WatcherCallback(zhandle_t* zh, int type, int state, const 
         } else if (state == ZOO_EXPIRED_SESSION_STATE) {
             client->is_connected_ = false;
             XRPC_LOG_ERROR("ZooKeeper session expired");
+        } else if (state == ZOO_CONNECTING_STATE) {
+            client->is_connected_ = false;
+            XRPC_LOG_WARN("ZooKeeper session connecting");
         }
     } else if (path != nullptr) {
         std::string node_path(path);
+        std::function<void(std::string)> callback;
+        {
+            std::lock_guard lock(client->cache_mutex_);
+            auto it = client->watchers_.find(node_path);
+            if (it != client->watchers_.end()) {
+                callback = it->second;
+            }
+        }
+
+        if (!callback) {
+            XRPC_LOG_DEBUG("No watcher found for node {}", node_path);
+            return;
+        }
+
         if (type == ZOO_CREATED_EVENT || type == ZOO_CHANGED_EVENT) {
             try {
                 std::string data = client->GetNodeData(node_path);
                 XRPC_LOG_DEBUG("Node {} updated, data: {}", node_path, data);
-                std::function<void(std::string)> callback;
                 {
                     std::lock_guard lock(client->cache_mutex_);
                     client->cache_[node_path] = data;
-                    auto it = client->watchers_.find(node_path);
-                    if (it != client->watchers_.end()) {
-                        callback = it->second;
-                    }
                 }
-                if (callback) {
-                    callback(data);
-                }
+                callback(data);
                 // 重新注册 Watcher
-                client->Watch(node_path, callback);
+                client->RegisterWatcher(node_path);
             } catch (const std::exception& e) {
                 XRPC_LOG_ERROR("Failed to handle node event: {}", e.what());
             }
         } else if (type == ZOO_DELETED_EVENT) {
             XRPC_LOG_DEBUG("Node {} deleted", node_path);
-            std::lock_guard lock(client->cache_mutex_);
-            client->cache_.erase(node_path);
-            client->watchers_.erase(node_path);
+            {
+                std::lock_guard lock(client->cache_mutex_);
+                client->cache_.erase(node_path);
+                client->watchers_.erase(node_path);
+            }
+            callback("");
+            // 重新注册 Watcher 以监控未来创建
+            client->RegisterWatcher(node_path);
         }
     }
 }
