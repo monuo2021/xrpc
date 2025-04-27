@@ -14,23 +14,22 @@ std::string XrpcCodec::Encode(const RpcHeader& header, const google::protobuf::M
         throw std::runtime_error("Failed to serialize args");
     }
 
-    // 更新 args_size 和压缩状态
     RpcHeader mutable_header = header;
     mutable_header.set_args_size(args_str.size());
 
-    if (mutable_header.compressed() && args_str.size() > 100) { // 跳过小数据压缩
+    if (mutable_header.compressed() && args_str.size() > 100) {
         std::string compressed_args = Compress(args_str);
-        if (compressed_args.size() < args_str.size()) { // 仅当压缩有效时使用
+        if (compressed_args.size() < args_str.size()) {
             XRPC_LOG_DEBUG("Compressed args from {} to {} bytes", args_str.size(), compressed_args.size());
             mutable_header.set_args_size(compressed_args.size());
             args_str = compressed_args;
         } else {
-            mutable_header.set_compressed(false); // 压缩无效，关闭标志
+            mutable_header.set_compressed(false);
             XRPC_LOG_DEBUG("Skipped compression: compressed size {} >= original size {}", 
                            compressed_args.size(), args_str.size());
         }
     } else if (mutable_header.compressed()) {
-        mutable_header.set_compressed(false); // 数据太小，禁用压缩
+        mutable_header.set_compressed(false);
         XRPC_LOG_DEBUG("Skipped compression: data size {} too small", args_str.size());
     }
 
@@ -53,18 +52,29 @@ std::string XrpcCodec::Encode(const RpcHeader& header, const google::protobuf::M
 }
 
 bool XrpcCodec::Decode(const std::string& data, RpcHeader& header, std::string& args) {
+    if (data.empty()) {
+        XRPC_LOG_ERROR("Empty data received");
+        return false;
+    }
+
     google::protobuf::io::ArrayInputStream input(data.data(), data.size());
     google::protobuf::io::CodedInputStream coded_input(&input);
+    coded_input.SetTotalBytesLimit(64 * 1024 * 1024); // 64MB 限制
 
     uint32_t header_size = 0;
     if (!coded_input.ReadVarint32(&header_size)) {
-        XRPC_LOG_ERROR("Failed to read header size");
+        XRPC_LOG_ERROR("Failed to read header size: invalid varint");
+        return false;
+    }
+
+    if (header_size == 0 || header_size > data.size()) {
+        XRPC_LOG_ERROR("Invalid header size: {}", header_size);
         return false;
     }
 
     std::string header_str;
     if (!coded_input.ReadString(&header_str, header_size)) {
-        XRPC_LOG_ERROR("Failed to read header");
+        XRPC_LOG_ERROR("Failed to read header: expected {} bytes", header_size);
         return false;
     }
 
@@ -73,9 +83,15 @@ bool XrpcCodec::Decode(const std::string& data, RpcHeader& header, std::string& 
         return false;
     }
 
+    uint32_t args_size = header.args_size();
+    if (args_size > data.size() - coded_input.CurrentPosition()) {
+        XRPC_LOG_ERROR("Invalid args size: {} exceeds remaining data", args_size);
+        return false;
+    }
+
     args.clear();
-    if (!coded_input.ReadString(&args, header.args_size())) {
-        XRPC_LOG_ERROR("Failed to read args, expected size: {}", header.args_size());
+    if (!coded_input.ReadString(&args, args_size)) {
+        XRPC_LOG_ERROR("Failed to read args: expected {} bytes", args_size);
         return false;
     }
 
@@ -113,7 +129,7 @@ bool XrpcCodec::DecodeResponse(const std::string& data, google::protobuf::Messag
 
 std::string XrpcCodec::Compress(const std::string& data) {
     z_stream stream = {};
-    if (deflateInit(&stream, Z_BEST_SPEED) != Z_OK) { // 使用 Z_BEST_SPEED 减少开销
+    if (deflateInit(&stream, Z_BEST_SPEED) != Z_OK) {
         XRPC_LOG_ERROR("Failed to initialize deflate");
         throw std::runtime_error("Failed to initialize deflate");
     }

@@ -25,15 +25,12 @@ void XrpcServer::Start() {
     std::string port = config_.Get("server_port", "8080");
     std::string address = ip + ":" + port;
 
-    // 注册服务到 ZooKeeper
     RegisterServices();
 
-    // 设置请求处理回调
     transport_->SetRequestCallback([this](const std::string& addr, const std::string& data) {
         OnRequest(addr, data);
     });
 
-    // 启动服务器
     try {
         transport_->StartServer(address);
         XRPC_LOG_INFO("XrpcServer started at {}", address);
@@ -76,24 +73,34 @@ void XrpcServer::OnRequest(const std::string& address, const std::string& data) 
     }
 
     std::string service_name = header.service_name();
-    std::string method_name = header.method_name();
+    if (service_name.empty()) {
+        XRPC_LOG_ERROR("Service name empty in request from {}", address);
+        return;
+    }
+
     auto it = services_.find(service_name);
     if (it == services_.end()) {
-        XRPC_LOG_ERROR("Service {} not found", service_name);
+        XRPC_LOG_ERROR("Service {} not found from {}", service_name, address);
         return;
     }
 
     google::protobuf::Service* service = it->second.get();
+    std::string method_name = header.method_name();
+    if (method_name.empty()) {
+        XRPC_LOG_ERROR("Method name empty for service {} from {}", service_name, address);
+        return;
+    }
+
     const google::protobuf::MethodDescriptor* method = service->GetDescriptor()->FindMethodByName(method_name);
     if (!method) {
-        XRPC_LOG_ERROR("Method {} not found in service {}", method_name, service_name);
+        XRPC_LOG_ERROR("Method {} not found in service {} from {}", method_name, service_name, address);
         return;
     }
 
     std::unique_ptr<google::protobuf::Message> request(service->GetRequestPrototype(method).New());
     std::unique_ptr<google::protobuf::Message> response(service->GetResponsePrototype(method).New());
     if (!request->ParseFromString(args)) {
-        XRPC_LOG_ERROR("Failed to parse request for {}.{}", service_name, method_name);
+        XRPC_LOG_ERROR("Failed to parse request for {}.{} from {}", service_name, method_name, address);
         return;
     }
 
@@ -104,15 +111,15 @@ void XrpcServer::OnRequest(const std::string& address, const std::string& data) 
     try {
         response_data = codec.EncodeResponse(*response);
     } catch (const std::exception& e) {
-        XRPC_LOG_ERROR("Failed to encode response: {}", e.what());
+        XRPC_LOG_ERROR("Failed to encode response for {}.{}: {}", service_name, method_name, e.what());
         return;
     }
 
     try {
         transport_->SendResponse(address, response_data);
-        XRPC_LOG_DEBUG("Sent response for {}.{}", service_name, method_name);
+        XRPC_LOG_DEBUG("Sent response for {}.{} to {}", service_name, method_name, address);
     } catch (const std::exception& e) {
-        XRPC_LOG_ERROR("Failed to send response: {}", e.what());
+        XRPC_LOG_ERROR("Failed to send response for {}.{}: {}", service_name, method_name, e.what());
     }
 }
 

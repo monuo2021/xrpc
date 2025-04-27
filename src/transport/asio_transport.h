@@ -9,6 +9,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <map>
+#include <thread>
 
 namespace xrpc {
 
@@ -17,16 +18,9 @@ public:
     AsioTransport();
     ~AsioTransport();
 
-    // 启动服务器
     void StartServer(const std::string& address);
-
-    // 设置请求回调
     void SetRequestCallback(std::function<void(const std::string&, const std::string&)> callback);
-
-    // 发送请求（客户端，同步）
     std::string SendRequest(const std::string& address, const std::string& data);
-
-    // 发送响应（服务器）
     void SendResponse(const std::string& address, const std::string& data);
 
 private:
@@ -43,6 +37,8 @@ private:
                          std::vector<char>& buffer);
 
     std::unique_ptr<boost::asio::io_context> io_context_;
+    std::unique_ptr<boost::asio::io_context::work> work_guard_;
+    std::thread io_thread_;
     std::unique_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
     std::shared_ptr<boost::asio::ip::tcp::socket> client_socket_;
     std::function<void(const std::string&, const std::string&)> request_callback_;
