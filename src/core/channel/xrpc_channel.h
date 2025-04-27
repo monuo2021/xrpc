@@ -4,7 +4,7 @@
 #include "core/common/xrpc_config.h"
 #include "core/common/xrpc_logger.h"
 #include "registry/zookeeper_client.h"
-#include "transport/muduo_transport.h"
+#include "transport/asio_transport.h"
 #include <google/protobuf/service.h>
 #include <string>
 #include <memory>
@@ -30,10 +30,10 @@ private:
 
     std::string service_name_;
     ZookeeperClient* zk_client_;
-    std::unique_ptr<MuduoTransport> transport_;
+    std::unique_ptr<AsioTransport> transport_;
     XrpcConfig config_;
     std::mutex mutex_;
-    std::map<std::string, std::string> address_cache_; // 方法名 -> 地址
+    std::map<std::string, std::string> address_cache_;
 };
 
 } // namespace xrpc

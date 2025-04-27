@@ -14,8 +14,7 @@ add_library(xrpc_core STATIC ${CORE_SRCS})
 target_link_libraries(xrpc_core
     xrpc_proto
     ${Protobuf_LIBRARIES}
-    ${MUDUO_BASE}
-    ${MUDUO_NET}
+    ${Boost_LIBRARIES}
     ${ZOOKEEPER_MT}
     ${ZLIB_LIBRARIES}
     spdlog::spdlog

@@ -7,7 +7,7 @@ namespace xrpc {
 
 XrpcServer::XrpcServer() {
     config_.Load("/home/tan/program/CppWorkSpace/xrpc/configs/xrpc.conf");
-    transport_ = std::make_unique<MuduoTransport>();
+    transport_ = std::make_unique<AsioTransport>();
     zk_client_.Start();
     XRPC_LOG_INFO("XrpcServer initialized");
 }

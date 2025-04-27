@@ -8,7 +8,7 @@ namespace xrpc {
 XrpcChannel::XrpcChannel(const std::string& service_name, ZookeeperClient* zk_client)
     : service_name_(service_name), zk_client_(zk_client) {
     config_.Load("/home/tan/program/CppWorkSpace/xrpc/configs/xrpc.conf");
-    transport_ = std::make_unique<MuduoTransport>();
+    transport_ = std::make_unique<AsioTransport>();
     XRPC_LOG_INFO("XrpcChannel initialized for service: {}", service_name_);
 }
 

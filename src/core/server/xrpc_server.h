@@ -4,7 +4,7 @@
 #include "core/common/xrpc_config.h"
 #include "core/common/xrpc_logger.h"
 #include "registry/zookeeper_client.h"
-#include "transport/muduo_transport.h"
+#include "transport/asio_transport.h"
 #include <google/protobuf/service.h>
 #include <memory>
 #include <string>
@@ -27,7 +27,7 @@ private:
     void RegisterServices();
     void OnRequest(const std::string& address, const std::string& data);
 
-    std::unique_ptr<MuduoTransport> transport_;
+    std::unique_ptr<AsioTransport> transport_;
     ZookeeperClient zk_client_;
     XrpcConfig config_;
     std::map<std::string, std::unique_ptr<google::protobuf::Service>> services_;
