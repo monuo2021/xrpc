@@ -11,14 +11,16 @@ namespace xrpc {
 class ZookeeperClientTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);   // 忽略日志
         ASSERT_NO_THROW(zk_.Start());
     }
 
     void TearDown() override {
         try {
-            zk_.Delete("/UserService/Login");
-            zk_.Delete("/UserService/Other");
-            zk_.Delete("/NonExistentService/UnknownMethod");
+            zk_.Delete("/UserService/127.0.0.1:8080");
+            zk_.Delete("/UserService/192.168.1.2:8081");
+            zk_.Delete("/UserService/127.0.0.1:8081");
+            zk_.Delete("/NonExistentService/127.0.0.1:9999");
         } catch (const std::exception& e) {
         }
     }
@@ -27,47 +29,47 @@ protected:
 };
 
 TEST_F(ZookeeperClientTest, RegisterAndDiscover) {
-    std::string path = "/UserService/Login";
-    std::string data = "127.0.0.1:8080";
+    std::string path = "/UserService/127.0.0.1:8080";
+    std::string data = "methods=Login";
 
     ASSERT_NO_THROW(zk_.Register(path, data, true));
     std::string discovered = zk_.Discover(path);
     EXPECT_EQ(discovered, data);
 
+    // 重复注册应允许（ZooKeeper节点是ephemeral，刷新TTL）
     ASSERT_NO_THROW(zk_.Register(path, data, true));
 
-    std::string new_data = "192.168.1.2:8081";
-    ASSERT_NO_THROW(zk_.Register(path, new_data, true));
-    discovered = zk_.Discover(path);
-    EXPECT_EQ(discovered, new_data);
-
-    discovered = zk_.Discover(path);
+    std::string new_path = "/UserService/192.168.1.2:8081";
+    std::string new_data = "methods=Login";
+    ASSERT_NO_THROW(zk_.Register(new_path, new_data, true));
+    discovered = zk_.Discover(new_path);
     EXPECT_EQ(discovered, new_data);
 }
 
 TEST_F(ZookeeperClientTest, DiscoverNonExistent) {
-    std::string path = "/NonExistentService/UnknownMethod";
+    std::string path = "/NonExistentService/127.0.0.1:9999";
     EXPECT_THROW(zk_.Discover(path), std::runtime_error);
 }
 
 TEST_F(ZookeeperClientTest, DeleteNode) {
-    std::string path = "/UserService/Login";
-    std::string data = "127.0.0.1:8080";
+    std::string path = "/UserService/127.0.0.1:8080";
+    std::string data = "methods=Login";
 
     ASSERT_NO_THROW(zk_.Register(path, data, true));
     ASSERT_NO_THROW(zk_.Delete(path));
     EXPECT_THROW(zk_.Discover(path), std::runtime_error);
-    ASSERT_NO_THROW(zk_.Delete(path));
+    ASSERT_NO_THROW(zk_.Delete(path)); // 删除已删除节点应捕获异常
 
-    std::string new_data = "192.168.1.2:8081";
-    ASSERT_NO_THROW(zk_.Register(path, new_data, true));
-    std::string discovered = zk_.Discover(path);
+    std::string new_path = "/UserService/192.168.1.2:8081";
+    std::string new_data = "methods=Login";
+    ASSERT_NO_THROW(zk_.Register(new_path, new_data, true));
+    std::string discovered = zk_.Discover(new_path);
     EXPECT_EQ(discovered, new_data);
 }
 
 TEST_F(ZookeeperClientTest, WatchNode) {
-    std::string path = "/UserService/Login";
-    std::string data = "127.0.0.1:8080";
+    std::string path = "/UserService/127.0.0.1:8080";
+    std::string data = "methods=Login";
     std::vector<std::string> received_data;
     bool node_deleted = false;
 
@@ -92,17 +94,17 @@ TEST_F(ZookeeperClientTest, WatchNode) {
         std::unique_lock lock(mtx);
         cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 1; });
     }
-    ASSERT_EQ(received_data.size(), 1) << "Expected 1 event after register, got " << received_data.size();
+    ASSERT_EQ(received_data.size(), 1);
     EXPECT_EQ(received_data[0], data);
 
     // 更新节点
-    std::string new_data = "192.168.1.2:8081";
+    std::string new_data = "methods=Login,Register";
     ASSERT_NO_THROW(zk_.Register(path, new_data, true));
     {
         std::unique_lock lock(mtx);
         cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 2; });
     }
-    ASSERT_EQ(received_data.size(), 2) << "Expected 2 events after update, got " << received_data.size();
+    ASSERT_EQ(received_data.size(), 2);
     EXPECT_EQ(received_data[1], new_data);
 
     // 删除节点
@@ -111,14 +113,14 @@ TEST_F(ZookeeperClientTest, WatchNode) {
         std::unique_lock lock(mtx);
         cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 3; });
     }
-    ASSERT_EQ(received_data.size(), 3) << "Expected 3 events after delete, got " << received_data.size();
+    ASSERT_EQ(received_data.size(), 3);
     EXPECT_TRUE(node_deleted);
     EXPECT_EQ(received_data[2], "");
 }
 
 TEST_F(ZookeeperClientTest, HeartbeatNodeCleanup) {
-    std::string path = "/UserService/Other";
-    std::string data = "127.0.0.1:8081";
+    std::string path = "/UserService/127.0.0.1:8081";
+    std::string data = "methods=Other";
 
     ASSERT_NO_THROW(zk_.Register(path, data, true));
     std::string discovered = zk_.Discover(path);
@@ -131,8 +133,8 @@ TEST_F(ZookeeperClientTest, HeartbeatNodeCleanup) {
 
 TEST_F(ZookeeperClientTest, WatchNonExistentNode) {
     XRPC_LOG_DEBUG("Starting WatchNonExistentNode test");
-    std::string path = "/NonExistentService/UnknownMethod";
-    std::string data = "127.0.0.1:8080";
+    std::string path = "/NonExistentService/127.0.0.1:9999";
+    std::string data = "methods=Login";
     std::string received_data;
     bool callback_called = false;
 
@@ -151,7 +153,7 @@ TEST_F(ZookeeperClientTest, WatchNonExistentNode) {
 
     XRPC_LOG_DEBUG("Registering node {}", path);
     ASSERT_NO_THROW(zk_.Register(path, data, true));
-    
+
     {
         XRPC_LOG_DEBUG("Waiting for watcher callback");
         std::unique_lock<std::mutex> lock(mtx);
@@ -161,9 +163,9 @@ TEST_F(ZookeeperClientTest, WatchNonExistentNode) {
             FAIL() << "Timeout waiting for watcher callback";
         }
     }
-    
+
     EXPECT_EQ(received_data, data);
-    
+
     XRPC_LOG_DEBUG("Cleaning up test node");
     ASSERT_NO_THROW(zk_.Delete(path));
     XRPC_LOG_DEBUG("WatchNonExistentNode test completed");
