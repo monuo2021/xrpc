@@ -9,6 +9,7 @@
 #include <mutex>
 #include <map>
 #include <atomic>
+#include <vector>
 
 namespace xrpc {
 
@@ -20,6 +21,8 @@ public:
     void Start();
     void Register(const std::string& path, const std::string& data, bool ephemeral = false);
     std::string Discover(const std::string& path);
+    std::vector<std::pair<std::string, std::string>> DiscoverService(const std::string& service);
+    std::vector<std::string> FindInstancesByMethod(const std::string& service, const std::string& method);
     void Delete(const std::string& path);
     void Watch(const std::string& path, std::function<void(std::string)> callback);
 
@@ -35,7 +38,7 @@ private:
     XrpcConfig config_;
     std::mutex cache_mutex_;
     std::mutex mutex_;
-    std::map<std::string, std::string> cache_;
+    std::map<std::string, std::vector<std::pair<std::string, std::string>>> service_cache_; // 服务名到实例列表的映射
     std::map<std::string, std::function<void(std::string)>> watchers_;
 };
 
