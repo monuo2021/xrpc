@@ -26,21 +26,25 @@ public:
     void Run();
 
 private:
-    // 客户端：处理连接和消息
-    void DoClientConnect(const std::string& ip, int port, boost::system::error_code& ec);
+    // 客户端处理
     void DoClientRead();
+    void HandleClientRead(const boost::system::error_code& ec, std::size_t bytes_transferred);
 
-    // 服务端：接受连接和处理消息
+    // 服务端处理
     void DoAccept();
+    void HandleAccept(std::shared_ptr<boost::asio::ip::tcp::socket> socket, const boost::system::error_code& ec);
     void DoServerRead(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+    void HandleServerRead(std::shared_ptr<boost::asio::ip::tcp::socket> socket, 
+                         const boost::system::error_code& ec, 
+                         std::size_t bytes_transferred);
 
     std::unique_ptr<boost::asio::io_context> io_context_;
     std::unique_ptr<boost::asio::ip::tcp::socket> client_socket_;
-    std::unique_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
+    std::unique_ptr<boost::asio::ip::tcp::acceptor> server_acceptor_;
     std::function<void(const std::string&, std::string&)> server_callback_;
     std::string response_;
     bool response_received_;
-    boost::asio::streambuf read_buffer_;
+    char read_buffer_[8192];
 };
 
 } // namespace xrpc
