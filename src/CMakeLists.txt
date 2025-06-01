@@ -1,5 +1,6 @@
-# 查找 spdlog
+# 查找 spdlog 和 Boost
 find_package(spdlog REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system)
 
 # 收集源文件
 file(GLOB CORE_SRCS
@@ -14,13 +15,13 @@ add_library(xrpc_core STATIC ${CORE_SRCS})
 target_link_libraries(xrpc_core
     xrpc_proto
     ${Protobuf_LIBRARIES}
-    ${MUDUO_BASE}
-    ${MUDUO_NET}
     ${ZOOKEEPER_MT}
     ${ZLIB_LIBRARIES}
     spdlog::spdlog
+    Boost::system
 )
 target_include_directories(xrpc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}/protos
+    ${Boost_INCLUDE_DIRS}
 )
