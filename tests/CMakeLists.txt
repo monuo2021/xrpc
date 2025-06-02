@@ -11,6 +11,7 @@ target_link_libraries(xrpc_tests
     xrpc_proto
     GTest::GTest
     GTest::Main
+    Boost::system
 )
 
 # 添加测试

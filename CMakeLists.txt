@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
+cmake_policy(SET CMP0167 NEW)
 project(XRPC VERSION 1.0 LANGUAGES CXX)
 
 # 设置 C++ 标准
@@ -10,11 +11,6 @@ find_package(Protobuf REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_library(ZOOKEEPER_MT zookeeper_mt)
-
-# 检查 Boost 是否找到
-if(NOT Boost_FOUND)
-    message(FATAL_ERROR "Boost libraries not found. Please install Boost.")
-endif()
 
 # 设置输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

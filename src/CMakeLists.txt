@@ -1,6 +1,5 @@
-# 查找 spdlog 和 Boost
+# 查找 spdlog
 find_package(spdlog REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
 
 # 收集源文件
 file(GLOB CORE_SRCS
@@ -23,5 +22,4 @@ target_link_libraries(xrpc_core
 target_include_directories(xrpc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}/protos
-    ${Boost_INCLUDE_DIRS}
 )
