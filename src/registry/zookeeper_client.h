@@ -10,6 +10,8 @@
 #include <map>
 #include <atomic>
 #include <vector>
+#include <thread>
+#include <memory>
 
 namespace xrpc {
 
@@ -40,6 +42,7 @@ private:
     std::mutex mutex_;
     std::map<std::string, std::vector<std::pair<std::string, std::string>>> service_cache_; // 服务名到实例列表的映射
     std::map<std::string, std::function<void(std::string)>> watchers_;
+    std::thread heartbeat_thread_; // 心跳线程
 };
 
 } // namespace xrpc

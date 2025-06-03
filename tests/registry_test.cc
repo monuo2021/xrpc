@@ -12,36 +12,40 @@ class ZookeeperClientTest : public ::testing::Test {
 protected:
     void SetUp() override {
         zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);
-        ASSERT_NO_THROW(zk_.Start());
+        zk_ = std::make_unique<ZookeeperClient>();
+        ASSERT_NO_THROW(zk_->Start());
     }
 
     void TearDown() override {
         try {
-            zk_.Delete("/UserService/127.0.0.1:8080");
-            zk_.Delete("/UserService/192.168.1.2:8081");
-            zk_.Delete("/UserService/127.0.0.1:8081");
-            zk_.Delete("/NonExistentService/127.0.0.1:9999");
+            zk_->Delete("/UserService/127.0.0.1:8080");
+            zk_->Delete("/UserService/192.168.1.2:8081");
+            zk_->Delete("/UserService/127.0.0.1:8081");
+            zk_->Delete("/NonExistentService/127.0.0.1:9999");
         } catch (const std::exception& e) {
+            XRPC_LOG_WARN("Failed to clean up node in TearDown: {}", e.what());
         }
+        zk_.reset();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    ZookeeperClient zk_;
+    std::unique_ptr<ZookeeperClient> zk_;
 };
 
 TEST_F(ZookeeperClientTest, RegisterAndDiscover) {
     std::string path = "/UserService/127.0.0.1:8080";
     std::string data = "methods=Login";
 
-    ASSERT_NO_THROW(zk_.Register(path, data, true));
-    std::string discovered = zk_.Discover(path);
+    ASSERT_NO_THROW(zk_->Register(path, data, true));
+    std::string discovered = zk_->Discover(path);
     EXPECT_EQ(discovered, data);
 
-    ASSERT_NO_THROW(zk_.Register(path, data, true));
+    ASSERT_NO_THROW(zk_->Register(path, data, true));
 
     std::string new_path = "/UserService/192.168.1.2:8081";
     std::string new_data = "methods=Login";
-    ASSERT_NO_THROW(zk_.Register(new_path, new_data, true));
-    discovered = zk_.Discover(new_path);
+    ASSERT_NO_THROW(zk_->Register(new_path, new_data, true));
+    discovered = zk_->Discover(new_path);
     EXPECT_EQ(discovered, new_data);
 }
 
@@ -51,10 +55,10 @@ TEST_F(ZookeeperClientTest, DiscoverService) {
     std::string path2 = "/UserService/192.168.1.2:8081";
     std::string data2 = "methods=Login,Register";
 
-    ASSERT_NO_THROW(zk_.Register(path1, data1, true));
-    ASSERT_NO_THROW(zk_.Register(path2, data2, true));
+    ASSERT_NO_THROW(zk_->Register(path1, data1, true));
+    ASSERT_NO_THROW(zk_->Register(path2, data2, true));
 
-    auto instances = zk_.DiscoverService("UserService");
+    auto instances = zk_->DiscoverService("UserService");
     ASSERT_EQ(instances.size(), 2);
     EXPECT_TRUE(std::find_if(instances.begin(), instances.end(),
                              [&path1, &data1](const auto& p) { return p.first == path1 && p.second == data1; }) != instances.end());
@@ -68,38 +72,38 @@ TEST_F(ZookeeperClientTest, FindInstancesByMethod) {
     std::string path2 = "/UserService/192.168.1.2:8081";
     std::string data2 = "methods=Login,Register";
 
-    ASSERT_NO_THROW(zk_.Register(path1, data1, true));
-    ASSERT_NO_THROW(zk_.Register(path2, data2, true));
+    ASSERT_NO_THROW(zk_->Register(path1, data1, true));
+    ASSERT_NO_THROW(zk_->Register(path2, data2, true));
 
-    auto instances = zk_.FindInstancesByMethod("UserService", "Login");
+    auto instances = zk_->FindInstancesByMethod("UserService", "Login");
     ASSERT_EQ(instances.size(), 2);
     EXPECT_TRUE(std::find(instances.begin(), instances.end(), "127.0.0.1:8080") != instances.end());
     EXPECT_TRUE(std::find(instances.begin(), instances.end(), "192.168.1.2:8081") != instances.end());
 
-    instances = zk_.FindInstancesByMethod("UserService", "Register");
+    instances = zk_->FindInstancesByMethod("UserService", "Register");
     ASSERT_EQ(instances.size(), 1);
     EXPECT_EQ(instances[0], "192.168.1.2:8081");
 }
 
 TEST_F(ZookeeperClientTest, DiscoverNonExistent) {
     std::string path = "/NonExistentService/127.0.0.1:9999";
-    EXPECT_THROW(zk_.Discover(path), std::runtime_error);
-    EXPECT_TRUE(zk_.DiscoverService("NonExistentService").empty());
+    EXPECT_THROW(zk_->Discover(path), std::runtime_error);
+    EXPECT_TRUE(zk_->DiscoverService("NonExistentService").empty());
 }
 
 TEST_F(ZookeeperClientTest, DeleteNode) {
     std::string path = "/UserService/127.0.0.1:8080";
     std::string data = "methods=Login";
 
-    ASSERT_NO_THROW(zk_.Register(path, data, true));
-    ASSERT_NO_THROW(zk_.Delete(path));
-    EXPECT_THROW(zk_.Discover(path), std::runtime_error);
-    ASSERT_NO_THROW(zk_.Delete(path));
+    ASSERT_NO_THROW(zk_->Register(path, data, true));
+    ASSERT_NO_THROW(zk_->Delete(path));
+    EXPECT_THROW(zk_->Discover(path), std::runtime_error);
+    ASSERT_NO_THROW(zk_->Delete(path));
 
     std::string new_path = "/UserService/192.0.0.1:8081";
     std::string new_data = "methods=Login";
-    ASSERT_NO_THROW(zk_.Register(new_path, new_data, true));
-    std::string discovered = zk_.Discover(new_path);
+    ASSERT_NO_THROW(zk_->Register(new_path, new_data, true));
+    std::string discovered = zk_->Discover(new_path);
     EXPECT_EQ(discovered, new_data);
 }
 
@@ -113,7 +117,7 @@ TEST_F(ZookeeperClientTest, WatchNode) {
     std::condition_variable cv;
     int event_count = 0;
 
-    zk_.Watch(path, [&](std::string new_data) {
+    zk_->Watch(path, [&](std::string new_data) {
         std::lock_guard lock(mtx);
         received_data.push_back(new_data);
         event_count++;
@@ -124,7 +128,7 @@ TEST_F(ZookeeperClientTest, WatchNode) {
         cv.notify_one();
     });
 
-    ASSERT_NO_THROW(zk_.Register(path, data, true));
+    ASSERT_NO_THROW(zk_->Register(path, data, true));
     {
         std::unique_lock lock(mtx);
         cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 1; });
@@ -133,7 +137,7 @@ TEST_F(ZookeeperClientTest, WatchNode) {
     EXPECT_EQ(received_data[0], data);
 
     std::string new_data = "methods=Login,Register";
-    ASSERT_NO_THROW(zk_.Register(path, new_data, true));
+    ASSERT_NO_THROW(zk_->Register(path, new_data, true));
     {
         std::unique_lock lock(mtx);
         cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 2; });
@@ -141,7 +145,7 @@ TEST_F(ZookeeperClientTest, WatchNode) {
     ASSERT_EQ(received_data.size(), 2);
     EXPECT_EQ(received_data[1], new_data);
 
-    ASSERT_NO_THROW(zk_.Delete(path));
+    ASSERT_NO_THROW(zk_->Delete(path));
     {
         std::unique_lock lock(mtx);
         cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 3; });
@@ -155,35 +159,42 @@ TEST_F(ZookeeperClientTest, HeartbeatNodeCleanup) {
     std::string path = "/UserService/127.0.0.1:8081";
     std::string data = "methods=Other";
 
-    ASSERT_NO_THROW(zk_.Register(path, data, true));
-    std::string discovered = zk_.Discover(path);
+    ASSERT_NO_THROW(zk_->Register(path, data, true));
+    std::string discovered = zk_->Discover(path);
     EXPECT_EQ(discovered, data);
 
-    ASSERT_NO_THROW(zk_.Delete(path));
+    ASSERT_NO_THROW(zk_->Delete(path));
     std::this_thread::sleep_for(std::chrono::seconds(12));
-    EXPECT_THROW(zk_.Discover(path), std::runtime_error);
-    auto instances = zk_.DiscoverService("UserService");
+    EXPECT_THROW(zk_->Discover(path), std::runtime_error);
+    auto instances = zk_->DiscoverService("UserService");
     EXPECT_TRUE(instances.empty());
 }
 
 TEST_F(ZookeeperClientTest, WatchNonExistentNode) {
     std::string path = "/NonExistentService/127.0.0.1:9999";
     std::string data = "methods=Login";
-    std::string received_data;
+    std::vector<std::string> received_data;
     bool callback_called = false;
+    bool node_deleted = false;
 
     std::mutex mtx;
     std::condition_variable cv;
+    int event_count = 0;
 
-    ASSERT_NO_THROW(zk_.Watch(path, [&](std::string new_data) {
+    ASSERT_NO_THROW(zk_->Watch(path, [&](std::string new_data) {
         std::lock_guard<std::mutex> lock(mtx);
-        received_data = new_data;
-        callback_called = true;
-        cv.notify_one();
+        received_data.push_back(new_data);
+        event_count++;
+        if (new_data.empty()) {
+            node_deleted = true;
+        } else {
+            callback_called = true;
+        }
         XRPC_LOG_DEBUG("Watcher triggered for {}: data={}", path, new_data);
+        cv.notify_one();
     }));
 
-    ASSERT_NO_THROW(zk_.Register(path, data, true));
+    ASSERT_NO_THROW(zk_->Register(path, data, true));
     {
         std::unique_lock<std::mutex> lock(mtx);
         if (!cv.wait_for(lock, std::chrono::seconds(5), [&]{ return callback_called; })) {
@@ -192,8 +203,20 @@ TEST_F(ZookeeperClientTest, WatchNonExistentNode) {
         }
     }
 
-    EXPECT_EQ(received_data, data);
-    ASSERT_NO_THROW(zk_.Delete(path));
+    EXPECT_EQ(received_data.size(), 1);
+    EXPECT_EQ(received_data[0], data);
+
+    ASSERT_NO_THROW(zk_->Delete(path));
+    {
+        std::unique_lock<std::mutex> lock(mtx);
+        if (!cv.wait_for(lock, std::chrono::seconds(5), [&]{ return node_deleted; })) {
+            XRPC_LOG_ERROR("Timeout waiting for node deletion callback");
+            FAIL() << "Timeout waiting for node deletion callback";
+        }
+    }
+
+    EXPECT_EQ(received_data.size(), 2);
+    EXPECT_EQ(received_data[1], "");
 }
 
 } // namespace xrpc
