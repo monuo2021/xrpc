@@ -1,5 +1,7 @@
 syntax = "proto3";
-package xrpc.example;
+package example;
+
+option cc_generic_services=true;
 
 service UserService {
     rpc Login(LoginRequest) returns (LoginResponse);
@@ -11,6 +13,7 @@ message LoginRequest {
 }
 
 message LoginResponse {
-    bool result = 1;
-    string message = 2;
+    bool success = 1;
+    string token = 2;
+    string error_message = 3; // 可选错误信息
 }
