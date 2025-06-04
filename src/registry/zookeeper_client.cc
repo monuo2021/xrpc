@@ -21,7 +21,6 @@ ZookeeperClient::~ZookeeperClient() {
         service_cache_.clear();
     }
     if (zk_handle_) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         zookeeper_close(zk_handle_);
         zk_handle_ = nullptr;
     }
@@ -40,9 +39,11 @@ void ZookeeperClient::Start() {
         throw std::runtime_error("Failed to initialize ZooKeeper client");
     }
 
-    int max_retries = 5;
+    // 减少重试次数和间隔，优化连接时间
+    int max_retries = 3;
+    int retry_interval_ms = 500;
     for (int i = 0; i < max_retries && !is_connected_; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(retry_interval_ms));
         if (zoo_state(zk_handle_) == ZOO_CONNECTED_STATE) {
             is_connected_ = true;
             break;
@@ -305,7 +306,8 @@ void ZookeeperClient::Heartbeat() {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        // 缩短心跳间隔以优化测试
+        std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 }
 
@@ -334,7 +336,6 @@ void ZookeeperClient::WatcherCallback(zhandle_t* zh, int type, int state, const 
     } else if (path != nullptr) {
         std::string node_path(path);
         std::function<void(std::string)> callback;
-        // 仅在查找 watcher 时锁定
         {
             std::lock_guard lock(client->cache_mutex_);
             auto it = client->watchers_.find(node_path);
@@ -364,7 +365,6 @@ void ZookeeperClient::WatcherCallback(zhandle_t* zh, int type, int state, const 
                         instances.emplace_back(node_path, data);
                     }
                 }
-                // 在释放 cache_mutex_ 后调用回调
                 callback(data);
                 client->RegisterWatcher(node_path);
             } catch (const std::exception& e) {
@@ -387,7 +387,6 @@ void ZookeeperClient::WatcherCallback(zhandle_t* zh, int type, int state, const 
                 }
                 client->watchers_.erase(node_path);
             }
-            // 在释放 cache_mutex_ 后调用回调
             callback("");
             client->RegisterWatcher(node_path);
         } else if (type == ZOO_CHILD_EVENT) {

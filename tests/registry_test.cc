@@ -26,7 +26,7 @@ protected:
             XRPC_LOG_WARN("Failed to clean up node in TearDown: {}", e.what());
         }
         zk_.reset();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // 移除 100ms 延迟，依赖析构函数的清理
     }
 
     std::unique_ptr<ZookeeperClient> zk_;
@@ -131,7 +131,7 @@ TEST_F(ZookeeperClientTest, WatchNode) {
     ASSERT_NO_THROW(zk_->Register(path, data, true));
     {
         std::unique_lock lock(mtx);
-        cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 1; });
+        cv.wait_for(lock, std::chrono::milliseconds(2000), [&]{ return event_count >= 1; });
     }
     ASSERT_EQ(received_data.size(), 1);
     EXPECT_EQ(received_data[0], data);
@@ -140,7 +140,7 @@ TEST_F(ZookeeperClientTest, WatchNode) {
     ASSERT_NO_THROW(zk_->Register(path, new_data, true));
     {
         std::unique_lock lock(mtx);
-        cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 2; });
+        cv.wait_for(lock, std::chrono::milliseconds(2000), [&]{ return event_count >= 2; });
     }
     ASSERT_EQ(received_data.size(), 2);
     EXPECT_EQ(received_data[1], new_data);
@@ -148,7 +148,7 @@ TEST_F(ZookeeperClientTest, WatchNode) {
     ASSERT_NO_THROW(zk_->Delete(path));
     {
         std::unique_lock lock(mtx);
-        cv.wait_for(lock, std::chrono::milliseconds(5000), [&]{ return event_count >= 3; });
+        cv.wait_for(lock, std::chrono::milliseconds(2000), [&]{ return event_count >= 3; });
     }
     ASSERT_EQ(received_data.size(), 3);
     EXPECT_TRUE(node_deleted);
@@ -164,7 +164,8 @@ TEST_F(ZookeeperClientTest, HeartbeatNodeCleanup) {
     EXPECT_EQ(discovered, data);
 
     ASSERT_NO_THROW(zk_->Delete(path));
-    std::this_thread::sleep_for(std::chrono::seconds(12));
+    // 调整等待时间以匹配新的心跳间隔（2秒）
+    std::this_thread::sleep_for(std::chrono::seconds(4));
     EXPECT_THROW(zk_->Discover(path), std::runtime_error);
     auto instances = zk_->DiscoverService("UserService");
     EXPECT_TRUE(instances.empty());
@@ -197,7 +198,7 @@ TEST_F(ZookeeperClientTest, WatchNonExistentNode) {
     ASSERT_NO_THROW(zk_->Register(path, data, true));
     {
         std::unique_lock<std::mutex> lock(mtx);
-        if (!cv.wait_for(lock, std::chrono::seconds(5), [&]{ return callback_called; })) {
+        if (!cv.wait_for(lock, std::chrono::milliseconds(2000), [&]{ return callback_called; })) {
             XRPC_LOG_ERROR("Timeout waiting for watcher callback");
             FAIL() << "Timeout waiting for watcher callback";
         }
@@ -209,7 +210,7 @@ TEST_F(ZookeeperClientTest, WatchNonExistentNode) {
     ASSERT_NO_THROW(zk_->Delete(path));
     {
         std::unique_lock<std::mutex> lock(mtx);
-        if (!cv.wait_for(lock, std::chrono::seconds(5), [&]{ return node_deleted; })) {
+        if (!cv.wait_for(lock, std::chrono::milliseconds(2000), [&]{ return node_deleted; })) {
             XRPC_LOG_ERROR("Timeout waiting for node deletion callback");
             FAIL() << "Timeout waiting for node deletion callback";
         }
