@@ -4,6 +4,7 @@
 #include "user_service.pb.h"
 #include <thread>
 #include <chrono>
+#include "registry/zookeeper_client.h"
 
 namespace xrpc {
 
@@ -23,25 +24,42 @@ class ServerTest : public ::testing::Test {
 protected:
     void SetUp() override {
         config_file_ = "../configs/xrpc.conf";
+        server_ = std::make_unique<XrpcServer>(config_file_);
+        server_->RegisterService(&service_);
+        server_thread_ = std::thread([this]() { server_->Start(); });
+
+        // 动态等待服务注册
+        ZookeeperClient zk;
+        zk.Start();
+        int retries = 5;
+        bool registered = false;
+        while (retries-- > 0) {
+            auto instances = zk.FindInstancesByMethod("UserService", "Login");
+            if (!instances.empty()) {
+                registered = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        ASSERT_TRUE(registered) << "Service not registered in ZooKeeper";
+    }
+
+    void TearDown() override {
+        server_.reset();
+        if (server_thread_.joinable()) {
+            server_thread_.join();
+        }
     }
 
     std::string config_file_;
+    MockUserService service_;
+    std::unique_ptr<XrpcServer> server_;
+    std::thread server_thread_;
 };
 
 TEST_F(ServerTest, RegisterAndStart) {
-    XrpcServer server(config_file_);
-    MockUserService service;
-    server.RegisterService(&service);
-
-    // 启动服务器（后台线程）
-    std::thread server_thread([&server]() { server.Start(); });
-    server_thread.detach();
-
-    // 等待服务器注册到 ZooKeeper
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-    // 验证服务注册（需 ZooKeeper 客户端检查，简化测试）
-    EXPECT_TRUE(true); // 假设注册成功
+    // 服务已通过 SetUp 注册和启动
+    EXPECT_TRUE(true);
 }
 
 } // namespace xrpc

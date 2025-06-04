@@ -12,7 +12,8 @@ XrpcChannel::XrpcChannel(const std::string& config_file) : zk_client_(new Zookee
 }
 
 XrpcChannel::~XrpcChannel() {
-    // transport_ 和 zk_client_ 由 unique_ptr 自动释放
+    transport_->Stop();
+    zk_client_->Stop();
 }
 
 void XrpcChannel::Init() {

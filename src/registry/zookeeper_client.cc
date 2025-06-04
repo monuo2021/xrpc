@@ -11,20 +11,7 @@ ZookeeperClient::ZookeeperClient() : zk_handle_(nullptr), is_connected_(false), 
 }
 
 ZookeeperClient::~ZookeeperClient() {
-    running_ = false;
-    if (heartbeat_thread_.joinable()) {
-        heartbeat_thread_.join();
-    }
-    {
-        std::lock_guard lock(cache_mutex_);
-        watchers_.clear();
-        service_cache_.clear();
-    }
-    if (zk_handle_) {
-        zookeeper_close(zk_handle_);
-        zk_handle_ = nullptr;
-    }
-    XRPC_LOG_DEBUG("ZookeeperClient destructed");
+    Stop();
 }
 
 void ZookeeperClient::Start() {
@@ -39,7 +26,6 @@ void ZookeeperClient::Start() {
         throw std::runtime_error("Failed to initialize ZooKeeper client");
     }
 
-    // 减少重试次数和间隔，优化连接时间
     int max_retries = 3;
     int retry_interval_ms = 500;
     for (int i = 0; i < max_retries && !is_connected_; ++i) {
@@ -60,6 +46,23 @@ void ZookeeperClient::Start() {
     XRPC_LOG_INFO("Connected to ZooKeeper: {}", host);
     running_ = true;
     heartbeat_thread_ = std::thread([this]() { Heartbeat(); });
+}
+
+void ZookeeperClient::Stop() {
+    running_ = false;
+    if (heartbeat_thread_.joinable()) {
+        heartbeat_thread_.join();
+    }
+    {
+        std::lock_guard lock(cache_mutex_);
+        watchers_.clear();
+        service_cache_.clear();
+    }
+    if (zk_handle_) {
+        zookeeper_close(zk_handle_);
+        zk_handle_ = nullptr;
+    }
+    XRPC_LOG_DEBUG("ZookeeperClient stopped");
 }
 
 void ZookeeperClient::Register(const std::string& path, const std::string& data, bool ephemeral) {

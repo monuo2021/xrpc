@@ -21,6 +21,7 @@ public:
     ~ZookeeperClient();
 
     void Start();
+    void Stop(); // 新增方法
     void Register(const std::string& path, const std::string& data, bool ephemeral = false);
     std::string Discover(const std::string& path);
     std::vector<std::pair<std::string, std::string>> DiscoverService(const std::string& service);
@@ -40,9 +41,9 @@ private:
     XrpcConfig config_;
     std::mutex cache_mutex_;
     std::mutex mutex_;
-    std::map<std::string, std::vector<std::pair<std::string, std::string>>> service_cache_; // 服务名到实例列表的映射
+    std::map<std::string, std::vector<std::pair<std::string, std::string>>> service_cache_;
     std::map<std::string, std::function<void(std::string)>> watchers_;
-    std::thread heartbeat_thread_; // 心跳线程
+    std::thread heartbeat_thread_;
 };
 
 } // namespace xrpc

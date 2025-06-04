@@ -8,8 +8,14 @@ namespace xrpc {
 AsioTransport::AsioTransport() : io_context_(new boost::asio::io_context), response_received_(false) {}
 
 AsioTransport::~AsioTransport() {
-    if (client_socket_) client_socket_->close();
-    if (server_acceptor_) server_acceptor_->close();
+    Stop();
+    boost::system::error_code ec;
+    if (client_socket_ && client_socket_->is_open()) {
+        client_socket_->close(ec);
+        if (ec) {
+            XRPC_LOG_ERROR("Failed to close client socket in destructor: {}", ec.message());
+        }
+    }
 }
 
 void AsioTransport::Connect(const std::string& ip, int port) {
@@ -43,7 +49,6 @@ bool AsioTransport::Send(const std::string& data, std::string& response) {
 
     response_received_ = false;
     
-    // 发送数据
     boost::system::error_code ec;
     boost::asio::write(*client_socket_, boost::asio::buffer(data), ec);
     if (ec) {
@@ -52,7 +57,6 @@ bool AsioTransport::Send(const std::string& data, std::string& response) {
     }
     XRPC_LOG_DEBUG("Sent {} bytes", data.size());
 
-    // 接收响应
     DoClientRead();
     io_context_->run_one();
     if (!response_received_) {
@@ -66,6 +70,42 @@ bool AsioTransport::Send(const std::string& data, std::string& response) {
 
 void AsioTransport::Run() {
     io_context_->run();
+}
+
+void AsioTransport::Stop() {
+    boost::system::error_code ec;
+    if (client_socket_ && client_socket_->is_open()) {
+        client_socket_->close(ec);
+        if (ec) {
+            XRPC_LOG_ERROR("Failed to close client socket: {}", ec.message());
+        }
+    }
+    if (server_acceptor_ && server_acceptor_->is_open()) {
+        server_acceptor_->cancel(ec);
+        if (ec) {
+            XRPC_LOG_ERROR("Failed to cancel acceptor: {}", ec.message());
+        }
+        server_acceptor_->close(ec);
+        if (ec) {
+            XRPC_LOG_ERROR("Failed to close server acceptor: {}", ec.message());
+        }
+    }
+    // 关闭所有活跃的 server sockets
+    for (auto& socket : server_sockets_) {
+        if (socket && socket->is_open()) {
+            socket->cancel(ec);
+            if (ec) {
+                XRPC_LOG_ERROR("Failed to cancel server socket: {}", ec.message());
+            }
+            socket->close(ec);
+            if (ec) {
+                XRPC_LOG_ERROR("Failed to close server socket: {}", ec.message());
+            }
+        }
+    }
+    server_sockets_.clear();
+    io_context_->stop();
+    io_context_->reset();
 }
 
 void AsioTransport::DoClientRead() {
@@ -88,6 +128,9 @@ void AsioTransport::HandleClientRead(const boost::system::error_code& ec, std::s
 }
 
 void AsioTransport::DoAccept() {
+    if (!server_acceptor_ || !server_acceptor_->is_open()) {
+        return;
+    }
     auto socket = std::make_shared<boost::asio::ip::tcp::socket>(*io_context_);
     server_acceptor_->async_accept(
         *socket,
@@ -100,6 +143,7 @@ void AsioTransport::DoAccept() {
 void AsioTransport::HandleAccept(std::shared_ptr<boost::asio::ip::tcp::socket> socket, const boost::system::error_code& ec) {
     if (!ec) {
         XRPC_LOG_INFO("Client connected: {}", socket->remote_endpoint().address().to_string());
+        server_sockets_.insert(socket); // 记录 socket
         DoServerRead(socket);
     } else {
         XRPC_LOG_ERROR("Accept error: {}", ec.message());
@@ -132,6 +176,7 @@ void AsioTransport::HandleServerRead(std::shared_ptr<boost::asio::ip::tcp::socke
         DoServerRead(socket);
     } else {
         XRPC_LOG_INFO("Client disconnected: {}", socket->remote_endpoint().address().to_string());
+        server_sockets_.erase(socket); // 移除断开的 socket
     }
 }
 

@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <set> // 新增头文件
 
 namespace xrpc {
 
@@ -13,24 +14,15 @@ public:
     AsioTransport();
     ~AsioTransport();
 
-    // 客户端：连接到服务器
     void Connect(const std::string& ip, int port);
-
-    // 服务端：启动服务器
     void StartServer(const std::string& ip, int port, std::function<void(const std::string&, std::string&)> callback);
-
-    // 发送请求并接收响应（客户端）
     bool Send(const std::string& data, std::string& response);
-
-    // 运行事件循环
     void Run();
+    void Stop();
 
 private:
-    // 客户端处理
     void DoClientRead();
     void HandleClientRead(const boost::system::error_code& ec, std::size_t bytes_transferred);
-
-    // 服务端处理
     void DoAccept();
     void HandleAccept(std::shared_ptr<boost::asio::ip::tcp::socket> socket, const boost::system::error_code& ec);
     void DoServerRead(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
@@ -45,6 +37,7 @@ private:
     std::string response_;
     bool response_received_;
     char read_buffer_[8192];
+    std::set<std::shared_ptr<boost::asio::ip::tcp::socket>> server_sockets_; // 跟踪活跃 server sockets
 };
 
 } // namespace xrpc
