@@ -16,8 +16,14 @@ public:
                const example::LoginRequest* request,
                example::LoginResponse* response,
                google::protobuf::Closure* done) override {
-        response->set_success(true);
-        response->set_token("mock_token");
+        if (request->username() == "test_user" && request->password() == "test_pass") {
+            response->set_success(true);
+            response->set_token("mock_token");
+        } else {
+            response->set_success(false);
+            response->set_token("");
+            controller->SetFailed("Invalid credentials");
+        }
         if (done) done->Run();
     }
 };
@@ -25,12 +31,12 @@ public:
 class ChannelTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);
         config_file_ = "../configs/xrpc.conf";
         server_ = std::make_unique<XrpcServer>(config_file_);
         server_->RegisterService(&mock_service_);
         server_thread_ = std::thread([this]() { server_->Start(); });
 
-        // 动态等待服务注册
         ZookeeperClient zk;
         zk.Start();
         int retries = 5;
@@ -79,7 +85,6 @@ TEST_F(ChannelTest, CallMethodSuccess) {
 }
 
 TEST_F(ChannelTest, CallMethodInvalidService) {
-    // 临时删除 UserService 节点
     ZookeeperClient zk;
     zk.Start();
     zk.Delete("/UserService/0.0.0.0:8080");
@@ -100,6 +105,26 @@ TEST_F(ChannelTest, CallMethodInvalidService) {
 
     delete request;
     delete response;
+    channel.reset();
+}
+
+TEST_F(ChannelTest, LoginFailure) {
+    std::unique_ptr<XrpcChannel> channel = std::make_unique<XrpcChannel>(config_file_);
+    XrpcController controller;
+    example::UserService_Stub stub(channel.get());
+
+    example::LoginRequest request;
+    request.set_username("wrong_user");
+    request.set_password("wrong_pass");
+
+    example::LoginResponse response;
+    stub.Login(&controller, &request, &response, nullptr);
+
+    EXPECT_TRUE(controller.Failed());
+    EXPECT_EQ(controller.ErrorText(), "Invalid credentials");
+    EXPECT_FALSE(response.success());
+    EXPECT_TRUE(response.token().empty());
+
     channel.reset();
 }
 

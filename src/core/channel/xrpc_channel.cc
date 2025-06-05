@@ -40,8 +40,6 @@ std::string XrpcChannel::GetServiceAddress(const std::string& service_name, cons
         throw std::runtime_error("Invalid address format");
     }
 
-    std::string ip = address.substr(0, colon_pos);
-    int port = std::stoi(address.substr(colon_pos + 1));
     return address;
 }
 
@@ -89,9 +87,16 @@ void XrpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
             return;
         }
 
-        // 解码响应
-        if (!codec_.DecodeResponse(response_data, *response)) {
+        RpcHeader response_header;
+        if (!codec_.DecodeResponse(response_data, response_header, *response)) {
             controller->SetFailed("Failed to decode response");
+            if (done) done->Run();
+            return;
+        }
+
+        if (response_header.status() != 0 && response_header.has_error()) {
+            controller->SetFailed(response_header.error().message());
+            XRPC_LOG_ERROR("Request failed: {}", response_header.error().message());
             if (done) done->Run();
             return;
         }
