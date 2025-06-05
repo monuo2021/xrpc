@@ -24,11 +24,11 @@ public:
     // 解码请求：返回 header 和 args
     bool Decode(const std::string& data, RpcHeader& header, std::string& args);
 
-    // 编码响应
-    std::string EncodeResponse(const google::protobuf::Message& response);
+    // 编码响应：header + response
+    std::string EncodeResponse(const RpcHeader& header, const google::protobuf::Message& response);
 
-    // 解码响应
-    bool DecodeResponse(const std::string& data, google::protobuf::Message& response);
+    // 解码响应：返回 header 和 response
+    bool DecodeResponse(const std::string& data, RpcHeader& header, google::protobuf::Message& response);
 
 private:
     // 压缩和解压缩

@@ -94,26 +94,98 @@ bool XrpcCodec::Decode(const std::string& data, RpcHeader& header, std::string& 
     return true;
 }
 
-std::string XrpcCodec::EncodeResponse(const google::protobuf::Message& response) {
+std::string XrpcCodec::EncodeResponse(const RpcHeader& header, const google::protobuf::Message& response) {
     std::string response_str;
     if (!response.SerializeToString(&response_str)) {
         XRPC_LOG_ERROR("Failed to serialize response");
         throw std::runtime_error("Failed to serialize response");
     }
-    return response_str;
+
+    RpcHeader mutable_header = header;
+    mutable_header.set_args_size(response_str.size());
+    if (mutable_header.compressed() && response_str.size() > 100) {
+        std::string compressed_response = Compress(response_str);
+        if (compressed_response.size() < response_str.size()) {
+            XRPC_LOG_DEBUG("Compressed response from {} to {} bytes", response_str.size(), compressed_response.size());
+            mutable_header.set_args_size(compressed_response.size());
+            response_str = compressed_response;
+        } else {
+            mutable_header.set_compressed(false);
+            XRPC_LOG_DEBUG("Skipped compression: compressed size {} >= original size {}", 
+                           compressed_response.size(), response_str.size());
+        }
+    } else if (mutable_header.compressed()) {
+        mutable_header.set_compressed(false);
+        XRPC_LOG_DEBUG("Skipped compression: data size {} too small", response_str.size());
+    }
+
+    std::string header_str;
+    if (!mutable_header.SerializeToString(&header_str)) {
+        XRPC_LOG_ERROR("Failed to serialize RpcHeader");
+        throw std::runtime_error("Failed to serialize RpcHeader");
+    }
+
+    std::string result;
+    google::protobuf::io::StringOutputStream output(&result);
+    google::protobuf::io::CodedOutputStream coded_output(&output);
+    coded_output.WriteVarint32(header_str.size());
+    coded_output.WriteString(header_str);
+    coded_output.WriteString(response_str);
+
+    XRPC_LOG_DEBUG("Encoded response: header_size={}, response_bytes={}", header_str.size(), response_str.size());
+    return result;
 }
 
-bool XrpcCodec::DecodeResponse(const std::string& data, google::protobuf::Message& response) {
-    if (!response.ParseFromString(data)) {
+bool XrpcCodec::DecodeResponse(const std::string& data, RpcHeader& header, google::protobuf::Message& response) {
+    google::protobuf::io::ArrayInputStream input(data.data(), data.size());
+    google::protobuf::io::CodedInputStream coded_input(&input);
+
+    uint32_t header_size = 0;
+    if (!coded_input.ReadVarint32(&header_size)) {
+        XRPC_LOG_ERROR("Failed to read header size");
+        return false;
+    }
+
+    std::string header_str;
+    if (!coded_input.ReadString(&header_str, header_size)) {
+        XRPC_LOG_ERROR("Failed to read header");
+        return false;
+    }
+
+    if (!header.ParseFromString(header_str)) {
+        XRPC_LOG_ERROR("Failed to parse RpcHeader");
+        return false;
+    }
+
+    std::string response_str;
+    if (!coded_input.ReadString(&response_str, header.args_size())) {
+        XRPC_LOG_ERROR("Failed to read response, expected size: {}", header.args_size());
+        return false;
+    }
+
+    if (header.compressed()) {
+        try {
+            response_str = Decompress(response_str);
+            XRPC_LOG_DEBUG("Decompressed response to {} bytes", response_str.size());
+        } catch (const std::runtime_error& e) {
+            XRPC_LOG_ERROR("Decompression failed: {}", e.what());
+            return false;
+        }
+    }
+
+    if (!response.ParseFromString(response_str)) {
         XRPC_LOG_ERROR("Failed to parse response");
         return false;
     }
+
+    XRPC_LOG_DEBUG("Decoded response: header_size={}, response_size={}, compressed={}",
+                   header_size, response_str.size(), header.compressed());
     return true;
 }
 
 std::string XrpcCodec::Compress(const std::string& data) {
     z_stream stream = {};
-    if (deflateInit(&stream, Z_BEST_SPEED) != Z_OK) { // 使用 Z_BEST_SPEED 减少开销
+    if (deflateInit(&stream, Z_BEST_SPEED) != Z_OK) {
         XRPC_LOG_ERROR("Failed to initialize deflate");
         throw std::runtime_error("Failed to initialize deflate");
     }
