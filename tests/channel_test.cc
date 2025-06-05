@@ -33,7 +33,7 @@ protected:
         // 动态等待服务注册
         ZookeeperClient zk;
         zk.Start();
-        int retries = 5; // 缩短重试次数
+        int retries = 5;
         bool registered = false;
         while (retries-- > 0) {
             auto instances = zk.FindInstancesByMethod("UserService", "Login");
@@ -41,7 +41,7 @@ protected:
                 registered = true;
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 缩短间隔
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         ASSERT_TRUE(registered) << "Service not registered in ZooKeeper";
     }
@@ -75,10 +75,16 @@ TEST_F(ChannelTest, CallMethodSuccess) {
     EXPECT_TRUE(response.success());
     EXPECT_EQ(response.token(), "mock_token");
 
-    channel.reset(); // 显式销毁
+    channel.reset();
 }
 
 TEST_F(ChannelTest, CallMethodInvalidService) {
+    // 临时删除 UserService 节点
+    ZookeeperClient zk;
+    zk.Start();
+    zk.Delete("/UserService/0.0.0.0:8080");
+    zk.Stop();
+
     std::unique_ptr<XrpcChannel> channel = std::make_unique<XrpcChannel>(config_file_);
     XrpcController controller;
     example::UserService_Stub stub(channel.get());
