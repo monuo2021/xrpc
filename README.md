@@ -36,8 +36,8 @@ XRPC/
 │   │   ├── zookeeper_client.h
 │   │   └── zookeeper_client.cc
 │   ├── transport/              # 网络通信
-│   │   ├── muduo_transport.h
-│   │   └── muduo_transport.cc
+│   │   ├── asio_transport.h
+│   │   └── asio_transport.cc
 │   └── CMakeLists.txt          # 核心模块编译规则
 ├── examples/                   # 示例代码
 │   ├── client/                 # 客户端示例
@@ -52,9 +52,9 @@ XRPC/
 │   ├── server_test.cc          # Server 测试
 │   ├── registry_test.cc        # Registry 测试
 │   ├── main.cc                 # 测试主函数
+│   ├── user_service_test.cc    # user_service 测试
 │   └── CMakeLists.txt
 ├── scripts/                    # 辅助脚本
-│   ├── generate_protos.sh      # 生成 Protobuf 代码
 │   └── run_tests.sh            # 运行测试
 └── configs/                    # 配置文件
     └── xrpc.conf               # 默认配置（ZooKeeper 地址、日志级别等）
