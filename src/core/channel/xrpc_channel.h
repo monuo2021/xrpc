@@ -9,6 +9,7 @@
 #include <google/protobuf/service.h>
 #include <memory>
 #include <string>
+#include <mutex>
 
 namespace xrpc {
 
@@ -31,13 +32,20 @@ private:
     // 获取服务地址
     std::string GetServiceAddress(const std::string& service_name, const std::string& method_name);
 
-    // 发送请求并接收响应
+    // 发送请求并接收响应（同步）
     bool SendRequest(const std::string& data, std::string& response);
+
+    // 发送请求并接收响应（异步）
+    void SendRequestAsync(const std::string& data,
+                         google::protobuf::RpcController* controller,
+                         google::protobuf::Message* response,
+                         google::protobuf::Closure* done);
 
     XrpcConfig config_;
     XrpcCodec codec_;
     std::unique_ptr<ZookeeperClient> zk_client_;
     std::unique_ptr<AsioTransport> transport_;
+    std::mutex mutex_;
 };
 
 } // namespace xrpc

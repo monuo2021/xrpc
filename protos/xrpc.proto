@@ -10,6 +10,7 @@ message RpcHeader {
     map<string, string> metadata = 6; // 元数据（超时、认证等）
     bool compressed = 7;              // 是否压缩
     RpcError error = 8;               // 错误信息（可选）
+    bool cancelled = 9;               // 是否取消请求
 }
 
 message RpcError {

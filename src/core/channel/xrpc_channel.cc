@@ -1,5 +1,6 @@
 #include "core/channel/xrpc_channel.h"
 #include "core/common/xrpc_logger.h"
+#include "core/controller/xrpc_controller.h"
 #include "xrpc.pb.h"
 #include <stdexcept>
 #include <sstream>
@@ -12,6 +13,7 @@ XrpcChannel::XrpcChannel(const std::string& config_file) : zk_client_(new Zookee
 }
 
 XrpcChannel::~XrpcChannel() {
+    std::lock_guard<std::mutex> lock(mutex_);
     transport_->Stop();
     zk_client_->Stop();
 }
@@ -44,12 +46,60 @@ std::string XrpcChannel::GetServiceAddress(const std::string& service_name, cons
 }
 
 bool XrpcChannel::SendRequest(const std::string& data, std::string& response) {
+    std::lock_guard<std::mutex> lock(mutex_);
     bool success = transport_->Send(data, response);
     if (!success) {
         XRPC_LOG_ERROR("Failed to send request");
         return false;
     }
     return true;
+}
+
+void XrpcChannel::SendRequestAsync(const std::string& data,
+                                  google::protobuf::RpcController* controller,
+                                  google::protobuf::Message* response,
+                                  google::protobuf::Closure* done) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    XrpcController* xrpc_controller = dynamic_cast<XrpcController*>(controller);
+    if (!xrpc_controller) {
+        XRPC_LOG_ERROR("Invalid controller type");
+        if (done) done->Run();
+        return;
+    }
+
+    transport_->SendAsync(data, [this, xrpc_controller, response, done](const std::string& response_data, bool success) {
+        if (!success) {
+            xrpc_controller->SetFailed("Failed to send async request");
+            XRPC_LOG_ERROR("Failed to send async request");
+            if (done) done->Run();
+            return;
+        }
+
+        if (xrpc_controller->IsCanceled()) {
+            xrpc_controller->SetFailed("Request was canceled");
+            XRPC_LOG_INFO("Async request canceled");
+            if (done) done->Run();
+            return;
+        }
+
+        RpcHeader response_header;
+        if (!codec_.DecodeResponse(response_data, response_header, *response)) {
+            xrpc_controller->SetFailed("Failed to decode async response");
+            XRPC_LOG_ERROR("Failed to decode async response");
+            if (done) done->Run();
+            return;
+        }
+
+        if (response_header.status() != 0 && response_header.has_error()) {
+            xrpc_controller->SetFailed(response_header.error().message());
+            XRPC_LOG_ERROR("Async request failed: {}", response_header.error().message());
+            if (done) done->Run();
+            return;
+        }
+
+        XRPC_LOG_INFO("Async request completed successfully");
+        if (done) done->Run();
+    });
 }
 
 void XrpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
@@ -67,7 +117,10 @@ void XrpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
         size_t colon_pos = address.find(':');
         std::string server_ip = address.substr(0, colon_pos);
         int server_port = std::stoi(address.substr(colon_pos + 1));
-        transport_->Connect(server_ip, server_port);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            transport_->Connect(server_ip, server_port);
+        }
 
         // 构造 RpcHeader
         RpcHeader header;
@@ -75,11 +128,27 @@ void XrpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
         header.set_method_name(method_name);
         header.set_request_id(rand()); // 简单生成请求 ID
         header.set_compressed(false); // 默认不压缩
+        header.set_cancelled(false);
+
+        // 检查是否已取消
+        XrpcController* xrpc_controller = dynamic_cast<XrpcController*>(controller);
+        if (xrpc_controller && xrpc_controller->IsCanceled()) {
+            xrpc_controller->SetFailed("Request was canceled before sending");
+            XRPC_LOG_INFO("Request canceled before sending");
+            if (done) done->Run();
+            return;
+        }
 
         // 序列化请求
         std::string data = codec_.Encode(header, *request);
 
-        // 发送请求并接收响应
+        // 异步调用
+        if (done) {
+            SendRequestAsync(data, controller, response, done);
+            return;
+        }
+
+        // 同步调用
         std::string response_data;
         if (!SendRequest(data, response_data)) {
             controller->SetFailed("Failed to send request");

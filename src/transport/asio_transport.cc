@@ -68,6 +68,31 @@ bool AsioTransport::Send(const std::string& data, std::string& response) {
     return true;
 }
 
+void AsioTransport::SendAsync(const std::string& data, std::function<void(const std::string&, bool)> callback) {
+    if (!client_socket_ || !client_socket_->is_open()) {
+        XRPC_LOG_ERROR("Client socket not connected");
+        callback("", false);
+        return;
+    }
+
+    boost::asio::async_write(
+        *client_socket_,
+        boost::asio::buffer(data),
+        [this, callback, data](const boost::system::error_code& ec, std::size_t /*bytes_transferred*/) {
+            if (ec) {
+                XRPC_LOG_ERROR("Failed to send async data: {}", ec.message());
+                callback("", false);
+                return;
+            }
+            XRPC_LOG_DEBUG("Sent {} bytes async", data.size());
+            DoClientAsyncRead(callback);
+        }
+    );
+
+    // 在单独线程中运行 io_context
+    std::thread([this]() { io_context_->run(); }).detach();
+}
+
 void AsioTransport::Run() {
     io_context_->run();
 }
@@ -90,7 +115,6 @@ void AsioTransport::Stop() {
             XRPC_LOG_ERROR("Failed to close server acceptor: {}", ec.message());
         }
     }
-    // 关闭所有活跃的 server sockets
     for (auto& socket : server_sockets_) {
         if (socket && socket->is_open()) {
             socket->cancel(ec);
@@ -127,6 +151,28 @@ void AsioTransport::HandleClientRead(const boost::system::error_code& ec, std::s
     }
 }
 
+void AsioTransport::DoClientAsyncRead(std::function<void(const std::string&, bool)> callback) {
+    client_socket_->async_read_some(
+        boost::asio::buffer(read_buffer_, sizeof(read_buffer_)),
+        [this, callback](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+            HandleClientAsyncRead(callback, ec, bytes_transferred);
+        }
+    );
+}
+
+void AsioTransport::HandleClientAsyncRead(std::function<void(const std::string&, bool)> callback,
+                                         const boost::system::error_code& ec,
+                                         std::size_t bytes_transferred) {
+    if (!ec) {
+        std::string response(read_buffer_, bytes_transferred);
+        XRPC_LOG_DEBUG("Received {} bytes async", bytes_transferred);
+        callback(response, true);
+    } else {
+        XRPC_LOG_ERROR("Async read error: {}", ec.message());
+        callback("", false);
+    }
+}
+
 void AsioTransport::DoAccept() {
     if (!server_acceptor_ || !server_acceptor_->is_open()) {
         return;
@@ -143,7 +189,7 @@ void AsioTransport::DoAccept() {
 void AsioTransport::HandleAccept(std::shared_ptr<boost::asio::ip::tcp::socket> socket, const boost::system::error_code& ec) {
     if (!ec) {
         XRPC_LOG_INFO("Client connected: {}", socket->remote_endpoint().address().to_string());
-        server_sockets_.insert(socket); // 记录 socket
+        server_sockets_.insert(socket);
         DoServerRead(socket);
     } else {
         XRPC_LOG_ERROR("Accept error: {}", ec.message());
@@ -176,7 +222,7 @@ void AsioTransport::HandleServerRead(std::shared_ptr<boost::asio::ip::tcp::socke
         DoServerRead(socket);
     } else {
         XRPC_LOG_INFO("Client disconnected: {}", socket->remote_endpoint().address().to_string());
-        server_sockets_.erase(socket); // 移除断开的 socket
+        server_sockets_.erase(socket);
     }
 }
 

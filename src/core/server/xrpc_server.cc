@@ -12,6 +12,7 @@ XrpcServer::XrpcServer(const std::string& config_file) : zk_client_(new Zookeepe
 }
 
 XrpcServer::~XrpcServer() {
+    std::lock_guard<std::mutex> lock(mutex_);
     transport_->Stop();
     zk_client_->Stop();
 }
@@ -26,6 +27,7 @@ void XrpcServer::Init() {
 }
 
 void XrpcServer::RegisterService(google::protobuf::Service* service) {
+    std::lock_guard<std::mutex> lock(mutex_);
     std::string service_name = service->GetDescriptor()->name();
     services_[service_name] = service;
 
@@ -54,6 +56,17 @@ void XrpcServer::OnMessage(const std::string& data, std::string& response) {
             error_header.set_status(1);
             error_header.mutable_error()->set_code(1);
             error_header.mutable_error()->set_message("Failed to decode request");
+            response = codec_.EncodeResponse(error_header, RpcHeader());
+            return;
+        }
+
+        // 检查取消标志
+        if (header.cancelled()) {
+            XRPC_LOG_INFO("Request for {}.{} canceled", header.service_name(), header.method_name());
+            RpcHeader error_header = header;
+            error_header.set_status(1);
+            error_header.mutable_error()->set_code(static_cast<int>(ErrorCode::CANCELLED));
+            error_header.mutable_error()->set_message("Request canceled by client");
             response = codec_.EncodeResponse(error_header, RpcHeader());
             return;
         }
@@ -103,7 +116,7 @@ void XrpcServer::OnMessage(const std::string& data, std::string& response) {
 
         ServiceDescriptor desc{header.service_name(), header.method_name(), method_desc};
         try {
-            CallServiceMethod(desc, request.get(), response_msg.get());
+            CallServiceMethod(desc, request.get(), response_msg.get(), header.cancelled());
             RpcHeader response_header = header;
             response_header.set_status(0);
             response = codec_.EncodeResponse(response_header, *response_msg);
@@ -128,10 +141,16 @@ void XrpcServer::OnMessage(const std::string& data, std::string& response) {
 
 void XrpcServer::CallServiceMethod(const ServiceDescriptor& desc,
                                   google::protobuf::Message* request,
-                                  google::protobuf::Message* response) {
+                                  google::protobuf::Message* response,
+                                  bool cancelled) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = services_.find(desc.service_name);
     if (it == services_.end()) {
         throw std::runtime_error("Service not found");
+    }
+
+    if (cancelled) {
+        throw std::runtime_error("Request canceled by client");
     }
 
     google::protobuf::Service* service = it->second;

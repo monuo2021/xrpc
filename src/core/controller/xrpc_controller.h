@@ -4,13 +4,14 @@
 #include "core/common/xrpc_common.h"
 #include <google/protobuf/service.h>
 #include <string>
+#include <mutex>
 
 namespace xrpc {
 
 class XrpcController : public google::protobuf::RpcController {
 public:
     XrpcController();
-    ~XrpcController() override = default;
+    ~XrpcController() override;
 
     // 重置状态
     void Reset() override;
@@ -24,12 +25,13 @@ public:
     // 设置失败
     void SetFailed(const std::string& reason) override;
 
-    // 取消相关（预留）
+    // 取消相关
     void StartCancel() override;
     bool IsCanceled() const override;
     void NotifyOnCancel(google::protobuf::Closure* callback) override;
 
 private:
+    mutable std::mutex mutex_;
     bool failed_;
     std::string error_text_;
     bool canceled_;

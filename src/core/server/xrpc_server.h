@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <mutex>
 
 namespace xrpc {
 
@@ -34,7 +35,8 @@ private:
     // 调用服务方法
     void CallServiceMethod(const ServiceDescriptor& desc,
                           google::protobuf::Message* request,
-                          google::protobuf::Message* response);
+                          google::protobuf::Message* response,
+                          bool cancelled);
 
     XrpcConfig config_;
     XrpcCodec codec_;
@@ -43,6 +45,7 @@ private:
     std::map<std::string, google::protobuf::Service*> services_;
     std::string server_ip_;
     int server_port_;
+    std::mutex mutex_;
 };
 
 } // namespace xrpc

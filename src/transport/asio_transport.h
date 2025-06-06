@@ -5,7 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <set> // 新增头文件
+#include <set>
 
 namespace xrpc {
 
@@ -17,12 +17,17 @@ public:
     void Connect(const std::string& ip, int port);
     void StartServer(const std::string& ip, int port, std::function<void(const std::string&, std::string&)> callback);
     bool Send(const std::string& data, std::string& response);
+    void SendAsync(const std::string& data, std::function<void(const std::string&, bool)> callback);
     void Run();
     void Stop();
 
 private:
     void DoClientRead();
     void HandleClientRead(const boost::system::error_code& ec, std::size_t bytes_transferred);
+    void DoClientAsyncRead(std::function<void(const std::string&, bool)> callback);
+    void HandleClientAsyncRead(std::function<void(const std::string&, bool)> callback,
+                              const boost::system::error_code& ec,
+                              std::size_t bytes_transferred);
     void DoAccept();
     void HandleAccept(std::shared_ptr<boost::asio::ip::tcp::socket> socket, const boost::system::error_code& ec);
     void DoServerRead(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
@@ -37,7 +42,7 @@ private:
     std::string response_;
     bool response_received_;
     char read_buffer_[8192];
-    std::set<std::shared_ptr<boost::asio::ip::tcp::socket>> server_sockets_; // 跟踪活跃 server sockets
+    std::set<std::shared_ptr<boost::asio::ip::tcp::socket>> server_sockets_;
 };
 
 } // namespace xrpc
