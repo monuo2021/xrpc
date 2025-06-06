@@ -67,14 +67,14 @@ XRPC is a lightweight RPC framework designed for learning and prototyping, bridg
 ## Features
 - **Protobuf-based**: Uses Protocol Buffers for service definitions and communication.
 - **Service Discovery**: Integrates with ZooKeeper for dynamic service registration and discovery.
-- **Long Connections**: Supports persistent TCP connections via Muduo.
+- **Long Connections**: Supports persistent TCP connections via Boost.Asio.
 - **Asynchronous Calls**: Allows non-blocking RPC calls with callbacks.
 - **Extensible**: Supports metadata, compression, and interceptors.
 
 ## Prerequisites
 - CMake 3.10+
 - C++11 compiler (g++, clang++)
-- Muduo network library
+- Boost.Asio network library
 - Protocol Buffers
 - ZooKeeper C client
 - spdlog (optional, for logging)
