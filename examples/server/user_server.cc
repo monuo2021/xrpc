@@ -7,6 +7,7 @@
 #include <thread>
 #include <condition_variable>
 #include <csignal>
+#include <iostream>
 
 // 用户数据库，模拟存储用户凭据
 class UserDatabase {
@@ -33,33 +34,44 @@ class UserServiceImpl : public example::UserService {
 public:
     UserServiceImpl() : db_() {}
 
+    // 本地登录方法，处理实际业务逻辑
+    bool LocalLogin(const std::string& username, const std::string& password) {
+        return db_.Validate(username, password);
+    }
+
     void Login(google::protobuf::RpcController* controller,
                const example::LoginRequest* request,
                example::LoginResponse* response,
                google::protobuf::Closure* done) override {
-        // 1. 验证请求参数
         XRPC_LOG_INFO("Received Login request for user: {}", request->username());
+        std::cout << "[INFO] Received Login request for user: " << request->username() << std::endl;
+
+        // 验证请求参数
         if (request->username().empty() || request->password().empty()) {
             response->set_success(false);
             response->set_error_message("Username or password empty");
             controller->SetFailed("Invalid input");
+            XRPC_LOG_ERROR("Login failed for user {}: Invalid input", request->username());
+            std::cout << "[ERROR] Login failed for user " << request->username() << ": Invalid input" << std::endl;
             if (done) done->Run();
             return;
         }
 
-        // 2. 模拟数据库验证（线程安全）
-        if (db_.Validate(request->username(), request->password())) {
+        // 调用本地业务逻辑
+        bool login_result = LocalLogin(request->username(), request->password());
+        if (login_result) {
             response->set_success(true);
             response->set_token("token_" + request->username() + "_" + std::to_string(rand()));
             XRPC_LOG_INFO("Login successful for user: {}", request->username());
+            std::cout << "[INFO] Login successful for user: " << request->username() << std::endl;
         } else {
             response->set_success(false);
             response->set_error_message("Invalid credentials");
             controller->SetFailed("Invalid credentials");
             XRPC_LOG_ERROR("Login failed for user: {}", request->username());
+            std::cout << "[ERROR] Login failed for user " << request->username() << ": Invalid credentials" << std::endl;
         }
 
-        // 3. 执行回调，完成请求
         if (done) done->Run();
     }
 
@@ -81,11 +93,12 @@ void SignalHandler(int /*sig*/) {
 }
 
 int main(int argc, char* argv[]) {
-    // 1. 注册信号处理，捕获 Ctrl+C
+    zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);
+    // 注册信号处理
     std::signal(SIGINT, SignalHandler);
     std::signal(SIGTERM, SignalHandler);
 
-    // 2. 初始化日志系统
+    // 初始化日志系统
     try {
         xrpc::InitLoggerFromConfig("../configs/xrpc.conf");
     } catch (const std::exception& e) {
@@ -93,26 +106,29 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 3. 创建并注册 UserService
+    // 创建并注册服务
     UserServiceImpl service;
     xrpc::XrpcServer server("../configs/xrpc.conf");
     server.RegisterService(&service);
     XRPC_LOG_INFO("UserService registered");
+    std::cout << "[INFO] UserService registered" << std::endl;
 
-    // 4. 启动服务器，监听请求
+    // 启动服务器
     try {
         server.Start();
     } catch (const std::exception& e) {
         XRPC_LOG_ERROR("Server failed to start: {}", e.what());
+        std::cerr << "[ERROR] Server failed to start: " << e.what() << std::endl;
         return 1;
     }
 
-    // 5. 阻塞主线程，直到收到终止信号
+    // 阻塞直到终止信号
     {
         std::unique_lock<std::mutex> lock(exit_mutex);
         exit_cv.wait(lock, [] { return !running; });
     }
     XRPC_LOG_INFO("Server shutting down");
+    std::cout << "[INFO] Server shutting down" << std::endl;
 
     return 0;
 }
