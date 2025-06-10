@@ -1,148 +1,168 @@
 #include "core/channel/xrpc_channel.h"
 #include "core/controller/xrpc_controller.h"
-#include "user_service.pb.h"
 #include "core/common/xrpc_logger.h"
+#include "user_service.pb.h"
 #include <google/protobuf/stubs/callback.h>
 #include <iostream>
-#include <string>
+#include <thread>
+#include <vector>
 #include <mutex>
 #include <condition_variable>
-#include <chrono>
-#include <getopt.h>
+#include <string>
 
 // 异步调用回调管理
-class AsyncClient {
+class AsyncCallback {
 public:
-    AsyncClient() : callback_called_(false) {}
-    
-    // 异步回调函数，通知调用完成
+    AsyncCallback(example::LoginResponse* response, xrpc::XrpcController* controller)
+        : response_(response), controller_(controller), called_(false) {}
+
     void OnCallback() {
-        std::lock_guard<std::mutex> lock(mtx_);
-        callback_called_ = true;
+        std::lock_guard<std::mutex> lock(mutex_);
+        error_text_ = controller_->ErrorText();
+        called_ = true;
         cv_.notify_one();
     }
-    
-    // 等待异步调用完成，超时 2 秒
-    bool Wait() {
-        std::unique_lock<std::mutex> lock(mtx_);
-        return cv_.wait_for(lock, std::chrono::seconds(2), [this] { return callback_called_; });
+
+    bool Wait(int timeout_ms = 5000) { // 增加超时时间
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return called_; });
     }
-    
-    bool IsCallbackCalled() const { return callback_called_; }
+
+    const std::string& GetErrorText() const { return error_text_; }
 
 private:
-    std::mutex mtx_;
+    example::LoginResponse* response_;
+    xrpc::XrpcController* controller_;
+    std::string error_text_;
+    bool called_;
+    std::mutex mutex_;
     std::condition_variable cv_;
-    bool callback_called_;
 };
 
-void PrintUsage(const char* program) {
-    std::cerr << "Usage: " << program << " [--config <config_file>] [--async] [--username <username>] [--password <password>]\n"
-              << "  --config   Path to xrpc.conf (default: ../configs/xrpc.conf)\n"
-              << "  --async    Use async call (default: sync)\n"
-              << "  --username Username for login (default: test_user)\n"
-              << "  --password Password for login (default: test_pass)\n";
+// 客户端逻辑
+class UserClient {
+public:
+    UserClient(const std::string& config_file) : channel_(config_file), stub_(&channel_) {}
+
+    bool SyncLogin(const std::string& username, const std::string& password, example::LoginResponse& response) {
+        xrpc::XrpcController controller;
+        example::LoginRequest request;
+        request.set_username(username);
+        request.set_password(password);
+
+        XRPC_LOG_INFO("Sending sync Login request for user: {}", username);
+        stub_.Login(&controller, &request, &response, nullptr);
+
+        if (controller.Failed()) {
+            XRPC_LOG_ERROR("Sync Login failed for user {}: {}", username, controller.ErrorText());
+            return false;
+        }
+        XRPC_LOG_INFO("Sync Login succeeded for user: {}", username);
+        return true;
+    }
+
+    bool AsyncLogin(const std::string& username, const std::string& password, example::LoginResponse& response) {
+        const int max_retries = 2; // 重试次数
+        for (int attempt = 1; attempt <= max_retries; ++attempt) {
+            xrpc::XrpcController controller;
+            example::LoginRequest request;
+            request.set_username(username);
+            request.set_password(password);
+
+            AsyncCallback callback(&response, &controller);
+            XRPC_LOG_INFO("Sending async Login request for user: {} (attempt {}/{})", username, attempt, max_retries);
+            stub_.Login(&controller, &request, &response,
+                        google::protobuf::NewCallback(&callback, &AsyncCallback::OnCallback));
+
+            if (!callback.Wait()) {
+                XRPC_LOG_ERROR("Async Login timeout for user: {} (attempt {}/{})", username, attempt, max_retries);
+                if (attempt == max_retries) {
+                    return false;
+                }
+                continue;
+            }
+
+            if (!callback.GetErrorText().empty()) {
+                XRPC_LOG_ERROR("Async Login failed for user {}: {} (attempt {}/{})", username, callback.GetErrorText(), attempt, max_retries);
+                return false;
+            }
+
+            XRPC_LOG_INFO("Async Login succeeded for user: {}", username);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    xrpc::XrpcChannel channel_;
+    example::UserService_Stub stub_;
+};
+
+void PrintUsage() {
+    std::cerr << "Usage: ./user_client [--sync | --async | --help]\n"
+              << "  --sync  : Use synchronous calls\n"
+              << "  --async : Use asynchronous calls\n"
+              << "  --help  : Show this help message\n";
 }
 
 int main(int argc, char* argv[]) {
-    // 默认参数
-    std::string config_file = "../configs/xrpc.conf";
+    bool use_sync = false;
     bool use_async = false;
-    std::string username = "test_user";
-    std::string password = "test_pass";
-
-    // 解析命令行参数
-    static struct option long_options[] = {
-        {"config", required_argument, nullptr, 'c'},
-        {"async", no_argument, nullptr, 'a'},
-        {"username", required_argument, nullptr, 'u'},
-        {"password", required_argument, nullptr, 'p'},
-        {nullptr, 0, nullptr, 0}
-    };
-    int opt;
-    while ((opt = getopt_long(argc, argv, "c:au:p:", long_options, nullptr)) != -1) {
-        switch (opt) {
-            case 'c': config_file = optarg; break;
-            case 'a': use_async = true; break;
-            case 'u': username = optarg; break;
-            case 'p': password = optarg; break;
-            default: PrintUsage(argv[0]); return 1;
-        }
+    if (argc != 2) {
+        PrintUsage();
+        return 1;
+    }
+    std::string arg(argv[1]);
+    if (arg == "--sync") {
+        use_sync = true;
+    } else if (arg == "--async") {
+        use_async = true;
+    } else if (arg == "--help") {
+        PrintUsage();
+        return 0;
+    } else {
+        PrintUsage();
+        return 1;
     }
 
-    // XRPC 调用流程：1. 初始化日志
     try {
-        xrpc::InitLoggerFromConfig(config_file);
-    } catch (const std::runtime_error& e) {
+        xrpc::InitLoggerFromConfig("../configs/xrpc.conf");
+    } catch (const std::exception& e) {
         std::cerr << "Failed to initialize logger: " << e.what() << std::endl;
         return 1;
     }
 
-    // XRPC 调用流程：2. 创建 XrpcChannel，加载配置并初始化 ZooKeeper
-    xrpc::XrpcChannel channel(config_file);
-    // - XrpcChannel 构造函数加载 xrpc.conf，初始化 ZooKeeper 客户端
-    // - ZooKeeper 用于服务发现，查找 UserService 的实例地址
+    UserClient client("../configs/xrpc.conf");
 
-    // XRPC 调用流程：3. 创建 XrpcController，管理请求状态和取消
-    xrpc::XrpcController controller;
-    // - XrpcController 跟踪请求是否失败、错误信息、是否取消
+    std::vector<std::pair<std::string, std::string>> test_users = {
+        {"test_user", "test_pass"},
+        {"admin", "admin123"},
+        {"invalid_user", "123"}
+    };
+    std::vector<std::thread> threads;
 
-    // XRPC 调用流程：4. 创建服务 Stub，封装远程调用
-    example::UserService_Stub stub(&channel);
-    // - Stub 将 Protobuf 定义的 UserService 转换为 C++ 接口
-
-    // XRPC 调用流程：5. 准备请求消息
-    example::LoginRequest request;
-    request.set_username(username);
-    request.set_password(password);
-
-    // XRPC 调用流程：6. 准备响应消息
-    example::LoginResponse response;
-
-    if (use_async) {
-        // XRPC 异步调用流程
-        AsyncClient async_client;
-
-        // XRPC 调用流程：7a. 发起异步调用
-        stub.Login(&controller, &request, &response,
-                   google::protobuf::NewCallback(&async_client, &AsyncClient::OnCallback));
-        // - stub.Login 调用 XrpcChannel::CallMethod，构造 RpcHeader
-        // - XrpcCodec 编码请求（Varint32 长度 + RpcHeader + Args）
-        // - AsioTransport 通过 Boost.Asio 异步发送请求
-        // - ZooKeeper 提供服务地址（如 0.0.0.0:8080）
-
-        // XRPC 调用流程：8a. 等待异步回调
-        if (!async_client.Wait()) {
-            std::cerr << "Async call timeout" << std::endl;
-            return 1;
-        }
-
-        // XRPC 调用流程：9a. 检查结果
-        if (controller.Failed()) {
-            std::cerr << "Async login failed: " << controller.ErrorText() << std::endl;
-            return 1;
-        }
-        std::cout << "Async login success: " << response.success()
-                  << ", token: " << response.token() << std::endl;
-    } else {
-        // XRPC 同步调用流程
-        // XRPC 调用流程：7b. 发起同步调用
-        stub.Login(&controller, &request, &response, nullptr);
-        // - stub.Login 调用 XrpcChannel::CallMethod，构造 RpcHeader
-        // - XrpcCodec 编码请求
-        // - AsioTransport 同步发送请求并等待响应
-        // - XrpcCodec 解码响应，填充 response
-
-        // XRPC 调用流程：8b. 检查结果
-        if (controller.Failed()) {
-            std::cerr << "Sync login failed: " << controller.ErrorText() << std::endl;
-            return 1;
-        }
-        std::cout << "Sync login success: " << response.success()
-                  << ", token: " << response.token() << std::endl;
+    for (const auto& user : test_users) {
+        threads.emplace_back([&client, &user, use_sync]() {
+            example::LoginResponse response;
+            bool success;
+            if (use_sync) {
+                success = client.SyncLogin(user.first, user.second, response);
+            } else {
+                success = client.AsyncLogin(user.first, user.second, response);
+            }
+            if (!success) {
+                std::cout << "Login failed for user " << user.first << ": "
+                          << response.error_message() << std::endl;
+            } else {
+                std::cout << "Login succeeded for user " << user.first
+                          << ", token: " << response.token() << std::endl;
+            }
+        });
     }
 
-    // XRPC 调用流程：10. 清理资源（由智能指针自动管理）
-    // - XrpcChannel 析构时关闭 ZooKeeper 和 AsioTransport
+    for (auto& t : threads) {
+        t.join();
+    }
+
     return 0;
 }

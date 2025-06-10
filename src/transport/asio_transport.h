@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 #include <set>
+#include <thread>
+#include <mutex>
 
 namespace xrpc {
 
@@ -24,19 +26,25 @@ public:
 private:
     void DoClientRead();
     void HandleClientRead(const boost::system::error_code& ec, std::size_t bytes_transferred);
-    void DoClientAsyncRead(std::function<void(const std::string&, bool)> callback);
-    void HandleClientAsyncRead(std::function<void(const std::string&, bool)> callback,
+    void DoClientAsyncRead(std::shared_ptr<std::array<char, 8192>> read_buffer,
+                          std::function<void(const std::string&, bool)> callback);
+    void HandleClientAsyncRead(std::shared_ptr<std::array<char, 8192>> read_buffer,
+                              std::function<void(const std::string&, bool)> callback,
                               const boost::system::error_code& ec,
                               std::size_t bytes_transferred);
     void DoAccept();
     void HandleAccept(std::shared_ptr<boost::asio::ip::tcp::socket> socket, const boost::system::error_code& ec);
     void DoServerRead(std::shared_ptr<boost::asio::ip::tcp::socket> socket);
     void HandleServerRead(std::shared_ptr<boost::asio::ip::tcp::socket> socket, 
+                         std::shared_ptr<std::array<char, 8192>> read_buffer,
                          const boost::system::error_code& ec, 
                          std::size_t bytes_transferred);
 
     std::unique_ptr<boost::asio::io_context> io_context_;
-    std::unique_ptr<boost::asio::ip::tcp::socket> client_socket_;
+    std::unique_ptr<boost::asio::io_context::work> work_;
+    std::thread io_context_thread_;
+    std::shared_ptr<boost::asio::ip::tcp::socket> client_socket_; // 改为 shared_ptr
+    std::mutex socket_mutex_; // 保护 client_socket_
     std::unique_ptr<boost::asio::ip::tcp::acceptor> server_acceptor_;
     std::function<void(const std::string&, std::string&)> server_callback_;
     std::string response_;
